@@ -27,6 +27,14 @@ Also available: **SRT / LRC export & import**, and **save/load project**
 (timings + style as JSON; media files are re-attached on load since browsers
 can't store them in the JSON).
 
+## Optional cloud layer (Google sign-in)
+
+Projects can also be saved to a per-user cloud library backed by Firebase
+(Auth + Firestore, free tier). The feature is dormant until a Firebase config
+is added — full step-by-step: [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md).
+Design prompts for restyling each screen live in
+[docs/DESIGN_PROMPTS.md](docs/DESIGN_PROMPTS.md).
+
 ## Why real-time export?
 
 GitHub Pages is static hosting — there is no server to run an encoder on.

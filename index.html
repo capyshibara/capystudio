@@ -19,6 +19,16 @@
     <button id="import-subs-btn" title="Import .srt or .lrc subtitles">Import subs</button>
     <input type="file" id="import-subs" accept=".srt,.lrc" hidden>
     <button id="export-video" class="primary">⬇ Export video</button>
+    <div class="account" id="account">
+      <button id="cloud-save" hidden title="Save project (timings + style) to your cloud library">☁ Save</button>
+      <button id="cloud-open" hidden title="Open a project from your cloud library">☁ Open</button>
+      <button id="sign-in" hidden title="Sign in to save projects to the cloud">Sign in with Google</button>
+      <span id="user-chip" class="user-chip" hidden>
+        <img id="user-avatar" alt="" referrerpolicy="no-referrer">
+        <span id="user-name"></span>
+        <button id="sign-out" title="Sign out">Sign out</button>
+      </span>
+    </div>
   </div>
 </header>
 

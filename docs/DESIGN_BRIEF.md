@@ -49,6 +49,9 @@ aria attributes, and rewrite `css/style.css` completely** — but:
 - Header actions: `save-project`, `load-project-btn`, `load-project`,
   `export-srt`, `export-lrc`, `import-subs-btn`, `import-subs`,
   `export-video`.
+- Account cluster (visibility toggled via the `hidden` attribute by JS):
+  `account`, `sign-in`, `sign-out`, `user-chip`, `user-avatar`, `user-name`,
+  `cloud-save`, `cloud-open`.
 - Export overlay: `export-overlay`, `export-progress`, `export-pct`,
   `export-cancel`. Shown/hidden via the `hidden` attribute — keep
   `[hidden] { display: none }` semantics working.

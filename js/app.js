@@ -3,6 +3,10 @@ import { srtStringify, srtParse, lrcStringify, lrcParse, formatTime } from './fo
 import { drawFrame } from './renderer.js';
 import { Waveform } from './waveform.js';
 import { exportVideo, cancelExport } from './exporter.js';
+import {
+  cloudEnabled, initCloud, signIn, signOutUser,
+  saveProjectToCloud, listCloudProjects, loadProjectFromCloud,
+} from './cloud.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -325,18 +329,22 @@ $('save-project').addEventListener('click', () => {
   downloadBlob(new Blob([serializeProject()], { type: 'application/json' }), baseName() + '.lvm.json');
 });
 
+function applyProjectJSON(text) {
+  const names = restoreProject(text);
+  syncStyleUI();
+  els.lyricsText.value = lyricClips().map((c) => c.text).join('\n');
+  renderLineList();
+  if (names.length) {
+    alert('Project loaded. Re-attach the media files:\n' + names.join('\n'));
+  }
+}
+
 $('load-project-btn').addEventListener('click', () => $('load-project').click());
 $('load-project').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   try {
-    const names = restoreProject(await file.text());
-    syncStyleUI();
-    els.lyricsText.value = lyricClips().map((c) => c.text).join('\n');
-    renderLineList();
-    if (names.length) {
-      alert('Project loaded. Re-attach the media files:\n' + names.join('\n'));
-    }
+    applyProjectJSON(await file.text());
   } catch (err) {
     alert('Could not load project: ' + err.message);
   }
@@ -376,6 +384,72 @@ $('export-video').addEventListener('click', async () => {
 });
 
 $('export-cancel').addEventListener('click', cancelExport);
+
+// ---------- cloud (optional; active only when firebase-config.js is filled) ----------
+
+if (cloudEnabled) {
+  const cloud = {
+    signIn: $('sign-in'),
+    signOut: $('sign-out'),
+    chip: $('user-chip'),
+    avatar: $('user-avatar'),
+    name: $('user-name'),
+    save: $('cloud-save'),
+    open: $('cloud-open'),
+  };
+
+  initCloud((user) => {
+    cloud.signIn.hidden = !!user;
+    cloud.chip.hidden = !user;
+    cloud.save.hidden = !user;
+    cloud.open.hidden = !user;
+    if (user) {
+      cloud.avatar.src = user.photoURL || '';
+      cloud.name.textContent = user.displayName?.split(' ')[0] || user.email;
+    }
+  }).catch((err) => console.warn('Cloud unavailable:', err));
+
+  cloud.signIn.addEventListener('click', async () => {
+    try {
+      await signIn();
+    } catch (err) {
+      if (err.code !== 'auth/popup-closed-by-user') alert('Sign-in failed: ' + err.message);
+    }
+  });
+
+  cloud.signOut.addEventListener('click', () => signOutUser());
+
+  cloud.save.addEventListener('click', async () => {
+    const name = prompt('Save to cloud as:', baseName());
+    if (!name || !name.trim()) return;
+    try {
+      await saveProjectToCloud(name.trim(), serializeProject());
+      alert(`Saved "${name.trim()}" to your cloud library.`);
+    } catch (err) {
+      alert('Cloud save failed: ' + err.message);
+    }
+  });
+
+  // v1 chooser uses native prompt(); a proper library dialog is specced as
+  // Screen 7 in docs/DESIGN_PROMPTS.md.
+  cloud.open.addEventListener('click', async () => {
+    try {
+      const items = await listCloudProjects();
+      if (!items.length) return alert('No cloud projects yet — use ☁ Save first.');
+      const name = prompt(
+        'Your cloud projects:\n\n' + items.map((p) => '• ' + p.name).join('\n') +
+          '\n\nType the name to open:',
+        items[0].name
+      );
+      if (!name || !name.trim()) return;
+      const json = await loadProjectFromCloud(name.trim());
+      if (!json) return alert(`No cloud project named "${name.trim()}".`);
+      applyProjectJSON(json);
+    } catch (err) {
+      alert('Cloud open failed: ' + err.message);
+    }
+  });
+}
 
 // ---------- render loop ----------
 
