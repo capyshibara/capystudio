@@ -1,10 +1,11 @@
-# 🎬 Lyric Video Maker
+# 🎬 CapyStudio
 
-Turn a song + a background image (or looping video) + lyrics into a subtitled
-music video — entirely in your browser. No install, no upload, no server:
-your files never leave your machine.
+Browser-based media studio. First module: **Lyric Video Maker** — turn a song
++ a background image (or looping video) + lyrics into a subtitled music video,
+entirely in your browser. No install, no upload, no server: your files never
+leave your machine.
 
-**Use it here: https://capyshibara.github.io/lyric-video-maker/**
+**Use it here: https://capyshibara.github.io/capystudio/**
 
 ## How to use
 

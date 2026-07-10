@@ -35,6 +35,7 @@ header {
 }
 
 h1 { font-size: 18px; margin: 0; }
+h1 .module-name { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 6px; }
 h2 { font-size: 13px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
 
 .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
