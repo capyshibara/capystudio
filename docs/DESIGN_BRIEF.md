@@ -52,6 +52,10 @@ aria attributes, and rewrite `css/style.css` completely** — but:
 - Account cluster (visibility toggled via the `hidden` attribute by JS):
   `account`, `sign-in`, `sign-out`, `user-chip`, `user-avatar`, `user-name`,
   `cloud-save`, `cloud-open`.
+- Cloud library popover: ids `cloud-popover`, `cloud-popover-body`,
+  `cloud-popover-close`; JS-generated classes `.cloud-popover__state`,
+  `.cloud-project` (+`__main`, `__name`, `__meta`, `__delete`, `__confirm`,
+  `.confirm-delete`), `.skeleton-row`/`.skeleton-bar`.
 - Export overlay: `export-overlay`, `export-progress`, `export-pct`,
   `export-cancel`. Shown/hidden via the `hidden` attribute — keep
   `[hidden] { display: none }` semantics working.

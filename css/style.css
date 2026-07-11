@@ -436,6 +436,150 @@ textarea::placeholder { color: var(--text-3); }
 }
 .user-chip button:hover { color: var(--text-1); background: var(--bg-3); }
 
+/* ---------- cloud project library popover ---------- */
+
+.cloud-popover {
+  position: fixed;
+  top: 64px;
+  right: 16px;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-elevated);
+  overflow: hidden;
+  z-index: 9;
+}
+
+.cloud-popover__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.cloud-popover__header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  text-transform: none;
+  letter-spacing: normal;
+}
+#cloud-popover-close {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font-size: 14px;
+  border-radius: 6px;
+}
+#cloud-popover-close:hover { background: var(--bg-3); color: var(--text-1); }
+
+.cloud-popover__body {
+  padding: 8px;
+  min-height: 210px;
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cloud-popover__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 16px;
+  text-align: center;
+  flex: 1;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.cloud-popover__state .state-icon { font-size: 20px; opacity: 0.7; }
+.cloud-popover__state button { height: 30px; padding: 0 14px; }
+.cloud-popover__state p { margin: 0; }
+
+.cloud-project {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  transition: background 140ms var(--ease-out);
+}
+.cloud-project:hover,
+.cloud-project:focus-within { background: var(--bg-3); }
+
+.cloud-project__main {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: none;
+  border: none;
+  padding: 9px 0 9px 10px;
+  text-align: left;
+}
+.cloud-project__main:hover { background: none; }
+.cloud-project__name {
+  font-size: 13px;
+  color: var(--text-1);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cloud-project__meta { font-size: 12px; color: var(--text-3); }
+
+.cloud-project__delete {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin-right: 8px;
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  font-size: 13px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 140ms var(--ease-out), background 140ms var(--ease-out);
+}
+.cloud-project:hover .cloud-project__delete,
+.cloud-project:focus-within .cloud-project__delete { opacity: 1; }
+.cloud-project__delete:hover { background: var(--record-soft); color: var(--record); }
+
+.cloud-project__confirm { display: flex; gap: 4px; flex: none; margin-right: 8px; }
+.cloud-project__confirm button { height: 26px; padding: 0 10px; font-size: 12px; }
+.cloud-project__confirm .confirm-delete {
+  background: var(--record);
+  color: #1a0a0a;
+  border-color: var(--record);
+}
+
+.skeleton-row { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+.skeleton-bar { height: 12px; width: 70%; background: var(--bg-2); border-radius: 4px; }
+.skeleton-bar.short { height: 10px; width: 40%; }
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes capy-shimmer {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+  }
+  .skeleton-bar { animation: capy-shimmer 1.3s var(--ease-out) infinite; }
+  .skeleton-bar.short { animation-delay: 0.15s; }
+}
+
 /* ---------- export overlay ---------- */
 
 .overlay {

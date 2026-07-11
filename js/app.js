@@ -5,7 +5,7 @@ import { Waveform } from './waveform.js';
 import { exportVideo, cancelExport } from './exporter.js';
 import {
   cloudEnabled, initCloud, signIn, signOutUser,
-  saveProjectToCloud, listCloudProjects, loadProjectFromCloud,
+  saveProjectToCloud, listCloudProjects, loadProjectFromCloud, deleteCloudProject,
 } from './cloud.js';
 
 const $ = (id) => document.getElementById(id);
@@ -430,25 +430,162 @@ if (cloudEnabled) {
     }
   });
 
-  // v1 chooser uses native prompt(); a proper library dialog is specced as
-  // Screen 7 in docs/DESIGN_PROMPTS.md.
-  cloud.open.addEventListener('click', async () => {
+  // ---- project library popover (☁ Open) ----
+
+  const lib = {
+    root: $('cloud-popover'),
+    body: $('cloud-popover-body'),
+    close: $('cloud-popover-close'),
+  };
+
+  function relTime(ts) {
+    if (!ts?.seconds) return 'just now';
+    const s = Date.now() / 1000 - ts.seconds;
+    if (s < 90) return 'just now';
+    if (s < 3600) return `${Math.round(s / 60)} minutes ago`;
+    if (s < 86400) return `${Math.round(s / 3600)} hours ago`;
+    if (s < 172800) return 'yesterday';
+    return `${Math.round(s / 86400)} days ago`;
+  }
+
+  function libState(icon, text, onRetry) {
+    lib.body.innerHTML = '';
+    const box = document.createElement('div');
+    box.className = 'cloud-popover__state';
+    const ic = document.createElement('span');
+    ic.className = 'state-icon';
+    ic.setAttribute('aria-hidden', 'true');
+    ic.textContent = icon;
+    const p = document.createElement('p');
+    p.textContent = text;
+    box.append(ic, p);
+    if (onRetry) {
+      const retry = document.createElement('button');
+      retry.textContent = 'Retry';
+      retry.addEventListener('click', onRetry);
+      box.appendChild(retry);
+    }
+    lib.body.appendChild(box);
+  }
+
+  function libShowLoading() {
+    lib.body.innerHTML = '';
+    for (let i = 0; i < 3; i++) {
+      const row = document.createElement('div');
+      row.className = 'skeleton-row';
+      const a = document.createElement('div');
+      a.className = 'skeleton-bar';
+      const b = document.createElement('div');
+      b.className = 'skeleton-bar short';
+      row.append(a, b);
+      lib.body.appendChild(row);
+    }
+  }
+
+  function libEmpty() {
+    libState('☁', 'No cloud projects yet — Save one first');
+  }
+
+  function libRow(item) {
+    const row = document.createElement('div');
+    row.className = 'cloud-project';
+
+    const main = document.createElement('button');
+    main.className = 'cloud-project__main';
+    main.title = `Open "${item.name}"`;
+    const name = document.createElement('span');
+    name.className = 'cloud-project__name';
+    name.textContent = item.name;
+    const meta = document.createElement('span');
+    meta.className = 'cloud-project__meta';
+    meta.textContent = `Updated ${relTime(item.updatedAt)}`;
+    main.append(name, meta);
+    main.addEventListener('click', async () => {
+      try {
+        const json = await loadProjectFromCloud(item.name);
+        if (!json) throw new Error('project not found');
+        closeLibrary();
+        applyProjectJSON(json);
+      } catch (err) {
+        alert('Could not open project: ' + err.message);
+      }
+    });
+
+    const del = document.createElement('button');
+    del.className = 'cloud-project__delete';
+    del.title = 'Delete project';
+    del.setAttribute('aria-label', `Delete "${item.name}"`);
+    del.textContent = '🗑';
+    del.addEventListener('click', () => {
+      const confirmBox = document.createElement('span');
+      confirmBox.className = 'cloud-project__confirm';
+      const yes = document.createElement('button');
+      yes.className = 'confirm-delete';
+      yes.textContent = 'Delete';
+      yes.addEventListener('click', async () => {
+        try {
+          await deleteCloudProject(item.name);
+          row.remove();
+          if (!lib.body.querySelector('.cloud-project')) libEmpty();
+        } catch (err) {
+          alert('Delete failed: ' + err.message);
+        }
+      });
+      const no = document.createElement('button');
+      no.textContent = 'Cancel';
+      no.addEventListener('click', () => confirmBox.replaceWith(del));
+      confirmBox.append(yes, no);
+      del.replaceWith(confirmBox);
+    });
+
+    row.append(main, del);
+    return row;
+  }
+
+  function libShowList(items) {
+    lib.body.innerHTML = '';
+    for (const item of items) lib.body.appendChild(libRow(item));
+  }
+
+  async function openLibrary() {
+    lib.root.hidden = false;
+    libShowLoading();
     try {
       const items = await listCloudProjects();
-      if (!items.length) return alert('No cloud projects yet — use ☁ Save first.');
-      const name = prompt(
-        'Your cloud projects:\n\n' + items.map((p) => '• ' + p.name).join('\n') +
-          '\n\nType the name to open:',
-        items[0].name
-      );
-      if (!name || !name.trim()) return;
-      const json = await loadProjectFromCloud(name.trim());
-      if (!json) return alert(`No cloud project named "${name.trim()}".`);
-      applyProjectJSON(json);
+      if (lib.root.hidden) return; // closed while loading
+      items.length ? libShowList(items) : libEmpty();
     } catch (err) {
-      alert('Cloud open failed: ' + err.message);
+      console.warn('cloud list failed', err);
+      libState('⚠', "Couldn't load your projects. Check your connection and try again.",
+        openLibrary);
     }
+  }
+
+  function closeLibrary() {
+    lib.root.hidden = true;
+  }
+
+  cloud.open.addEventListener('click', () => {
+    lib.root.hidden ? openLibrary() : closeLibrary();
   });
+  lib.close.addEventListener('click', closeLibrary);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !lib.root.hidden) closeLibrary();
+  });
+  document.addEventListener('click', (e) => {
+    if (lib.root.hidden) return;
+    if (!lib.root.contains(e.target) && !e.target.closest('#cloud-open')) closeLibrary();
+  });
+
+  // Exposed for automated UI testing of the popover states.
+  window.__libDemo = {
+    open: () => (lib.root.hidden = false),
+    close: closeLibrary,
+    loading: libShowLoading,
+    empty: libEmpty,
+    error: () => libState('⚠', "Couldn't load your projects. Check your connection and try again.", openLibrary),
+    list: libShowList,
+  };
 }
 
 // ---------- render loop ----------
