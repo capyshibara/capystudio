@@ -12,13 +12,13 @@ export function drawFrame(ctx, state, t) {
     canvas.height = height;
   }
 
-  ctx.fillStyle = '#0c0c10';
+  ctx.fillStyle = '#0b0d12';
   ctx.fillRect(0, 0, width, height);
 
   if (state.bgEl) {
     drawCover(ctx, state.bgEl, width, height);
   } else {
-    ctx.fillStyle = '#3a3a48';
+    ctx.fillStyle = '#5b6478';
     ctx.font = `500 ${Math.round(height / 24)}px system-ui`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';

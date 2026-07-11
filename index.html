@@ -5,11 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CapyStudio · Lyric Video Maker</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
 <header>
-  <h1>🎬 CapyStudio <span class="module-name">Lyric Video Maker</span></h1>
+  <h1><span class="wordmark">CapyStudio</span> <span class="module-name">Lyric Video Maker</span></h1>
   <div class="header-actions">
     <button id="save-project" title="Save timings + style as a JSON project file">💾 Save project</button>
     <button id="load-project-btn" title="Load a saved project file">📂 Load project</button>
@@ -18,17 +21,19 @@
     <button id="export-lrc" title="Download subtitles as .lrc">LRC</button>
     <button id="import-subs-btn" title="Import .srt or .lrc subtitles">Import subs</button>
     <input type="file" id="import-subs" accept=".srt,.lrc" hidden>
-    <button id="export-video" class="primary">⬇ Export video</button>
+    <span class="divider" aria-hidden="true"></span>
     <div class="account" id="account">
-      <button id="cloud-save" hidden title="Save project (timings + style) to your cloud library">☁ Save</button>
-      <button id="cloud-open" hidden title="Open a project from your cloud library">☁ Open</button>
-      <button id="sign-in" hidden title="Sign in to save projects to the cloud">Sign in with Google</button>
       <span id="user-chip" class="user-chip" hidden>
         <img id="user-avatar" alt="" referrerpolicy="no-referrer">
         <span id="user-name"></span>
-        <button id="sign-out" title="Sign out">Sign out</button>
+        <button id="sign-out" title="Sign out" aria-label="Sign out">✕</button>
       </span>
+      <button id="cloud-save" hidden title="Save this project's timings + style to your account — media files stay on this device">☁ Save</button>
+      <button id="cloud-open" hidden title="Open a project saved to your account">☁ Open</button>
+      <button id="sign-in" hidden title="Sign in to save projects to the cloud">Sign in with Google</button>
     </div>
+    <span class="divider" aria-hidden="true"></span>
+    <button id="export-video" class="primary">⬇ Export video</button>
   </div>
 </header>
 
@@ -83,12 +88,12 @@
     <div class="preview-wrap" id="preview-wrap">
       <canvas id="preview"></canvas>
     </div>
-    <audio id="player" controls></audio>
+    <div class="transport"><audio id="player" controls></audio></div>
     <div class="wave-wrap" id="wave-wrap">
       <canvas id="wave"></canvas>
       <canvas id="wave-overlay"></canvas>
     </div>
-    <p class="hint">Space = play/pause · While tap-timing: <b>Space</b> stamps next line, <b>X</b> ends current line (gap), <b>Esc</b> stops</p>
+    <p class="hint"><kbd>Space</kbd> play/pause · while tap-timing: <kbd>Space</kbd> stamps next line, <kbd>X</kbd> ends line, <kbd>Esc</kbd> stops</p>
   </section>
 
   <aside class="panel right">

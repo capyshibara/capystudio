@@ -57,7 +57,7 @@ export class Waveform {
     const { width: W, height: H } = this.wave;
     ctx.clearRect(0, 0, W, H);
     if (!this.peaks) {
-      ctx.fillStyle = '#3a3a48';
+      ctx.fillStyle = '#5b6478';
       ctx.font = `${12 * (window.devicePixelRatio || 1)}px system-ui`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -66,7 +66,7 @@ export class Waveform {
     }
     const buckets = this.peaks.length / 2;
     const mid = H / 2;
-    ctx.fillStyle = '#5f7ad1';
+    ctx.fillStyle = '#7c92ff';
     for (let x = 0; x < W; x++) {
       const b = Math.floor((x / W) * buckets);
       const min = this.peaks[b * 2];
@@ -90,7 +90,7 @@ export class Waveform {
     const d = this.getDuration();
     if (!d) return;
 
-    ctx.fillStyle = 'rgba(120, 220, 140, 0.9)';
+    ctx.fillStyle = 'rgba(87, 211, 140, 0.9)';
     for (const c of clips) {
       if (c.start == null) continue;
       const x = (c.start / d) * W;
@@ -98,7 +98,7 @@ export class Waveform {
     }
 
     const px = (t / d) * W;
-    ctx.fillStyle = '#e05c5c';
+    ctx.fillStyle = '#ff5c5c';
     ctx.fillRect(px - 1, 0, 2, H);
   }
 }
