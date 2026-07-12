@@ -50,10 +50,15 @@ Static site, no build step. Serve the folder and open it:
 python3 -m http.server 8000
 ```
 
+Pages: `index.html` is the home/module launcher; the editor lives at
+`editor.html` (deep-linkable as `editor.html?project=<name>` to auto-open a
+cloud project after sign-in).
+
 Modules:
 
 | File | Role |
 |---|---|
+| `js/home.js` | Home screen: recent cloud projects list |
 | `js/model.js` | Project state: assets / tracks / clips / style (serializable JSON) |
 | `js/renderer.js` | Pure canvas frame renderer — drives both preview and export |
 | `js/exporter.js` | MediaRecorder capture (canvas + Web Audio graph) |

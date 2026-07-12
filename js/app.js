@@ -1,5 +1,5 @@
 import { project, fileStore, lyricClips, serializeProject, restoreProject } from './model.js';
-import { srtStringify, srtParse, lrcStringify, lrcParse, formatTime } from './formats.js';
+import { srtStringify, srtParse, lrcStringify, lrcParse, formatTime, relTime } from './formats.js';
 import { drawFrame } from './renderer.js';
 import { Waveform } from './waveform.js';
 import { exportVideo, cancelExport } from './exporter.js';
@@ -398,7 +398,11 @@ if (cloudEnabled) {
     open: $('cloud-open'),
   };
 
-  initCloud((user) => {
+  // Deep link from the home screen: editor.html?project=<name> auto-opens
+  // that cloud project once the user is signed in (consumed once).
+  let pendingCloudProject = new URLSearchParams(location.search).get('project');
+
+  initCloud(async (user) => {
     cloud.signIn.hidden = !!user;
     cloud.chip.hidden = !user;
     cloud.save.hidden = !user;
@@ -406,6 +410,18 @@ if (cloudEnabled) {
     if (user) {
       cloud.avatar.src = user.photoURL || '';
       cloud.name.textContent = user.displayName?.split(' ')[0] || user.email;
+    }
+    if (user && pendingCloudProject) {
+      const name = pendingCloudProject;
+      pendingCloudProject = null;
+      history.replaceState(null, '', location.pathname);
+      try {
+        const json = await loadProjectFromCloud(name);
+        if (json) applyProjectJSON(json);
+        else alert(`No cloud project named "${name}".`);
+      } catch (err) {
+        alert('Could not open project: ' + err.message);
+      }
     }
   }).catch((err) => console.warn('Cloud unavailable:', err));
 
@@ -437,16 +453,6 @@ if (cloudEnabled) {
     body: $('cloud-popover-body'),
     close: $('cloud-popover-close'),
   };
-
-  function relTime(ts) {
-    if (!ts?.seconds) return 'just now';
-    const s = Date.now() / 1000 - ts.seconds;
-    if (s < 90) return 'just now';
-    if (s < 3600) return `${Math.round(s / 60)} minutes ago`;
-    if (s < 86400) return `${Math.round(s / 3600)} hours ago`;
-    if (s < 172800) return 'yesterday';
-    return `${Math.round(s / 86400)} days ago`;
-  }
 
   function libState(icon, text, onRetry) {
     lib.body.innerHTML = '';

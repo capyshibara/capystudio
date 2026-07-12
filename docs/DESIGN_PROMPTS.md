@@ -20,7 +20,7 @@ each screen, run the QA walkthrough in `docs/DESIGN_BRIEF.md` §6 before moving 
 >   `label.file-drop > input[type=file]` pattern, native `<audio id="player">`).
 > - Static GitHub Pages site: no frameworks, no build step, no JS libraries.
 >   All styling in `css/style.css`; HTML wrapper/class/aria changes allowed in
->   `index.html`; in JS you may only swap the canvas color hex constants in
+>   `editor.html` (editor) / `index.html` (home); in JS you may only swap the canvas color hex constants in
 >   `js/waveform.js` / `js/renderer.js`.
 > - Keyboard flow (Space / X / Esc on `document`) must not be intercepted.
 > - AA contrast, `:focus-visible` rings, `prefers-reduced-motion` respected.

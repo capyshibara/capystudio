@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lyric Video Maker · CapyStudio</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+<header>
+  <h1><a class="wordmark" href="./" title="CapyStudio home">CapyStudio</a> <span class="module-name">Lyric Video Maker</span></h1>
+  <div class="header-actions">
+    <button id="save-project" title="Save timings + style as a JSON project file">💾 Save project</button>
+    <button id="load-project-btn" title="Load a saved project file">📂 Load project</button>
+    <input type="file" id="load-project" accept=".json" hidden>
+    <button id="export-srt" title="Download subtitles as .srt">SRT</button>
+    <button id="export-lrc" title="Download subtitles as .lrc">LRC</button>
+    <button id="import-subs-btn" title="Import .srt or .lrc subtitles">Import subs</button>
+    <input type="file" id="import-subs" accept=".srt,.lrc" hidden>
+    <span class="divider" aria-hidden="true"></span>
+    <div class="account" id="account">
+      <span id="user-chip" class="user-chip" hidden>
+        <img id="user-avatar" alt="" referrerpolicy="no-referrer">
+        <span id="user-name"></span>
+        <button id="sign-out" title="Sign out" aria-label="Sign out">✕</button>
+      </span>
+      <button id="cloud-save" hidden title="Save this project's timings + style to your account — media files stay on this device">☁ Save</button>
+      <button id="cloud-open" hidden title="Open a project saved to your account">☁ Open</button>
+      <button id="sign-in" hidden title="Sign in to save projects to the cloud">Sign in with Google</button>
+    </div>
+    <span class="divider" aria-hidden="true"></span>
+    <button id="export-video" class="primary">⬇ Export video</button>
+  </div>
+</header>
+
+<main>
+  <aside class="panel left">
+    <section>
+      <h2>Media</h2>
+      <label class="file-drop" id="audio-drop">
+        <input type="file" id="audio-input" accept="audio/*">
+        <span id="audio-name">🎵 Choose audio (or drop here)</span>
+      </label>
+      <label class="file-drop" id="bg-drop">
+        <input type="file" id="bg-input" accept="image/*,video/*">
+        <span id="bg-name">🖼 Choose background image / video</span>
+      </label>
+      <label class="row">Resolution
+        <select id="resolution">
+          <option value="1920x1080" selected>1920 × 1080 (16:9)</option>
+          <option value="1280x720">1280 × 720 (16:9)</option>
+          <option value="1080x1920">1080 × 1920 (9:16 vertical)</option>
+          <option value="1080x1080">1080 × 1080 (square)</option>
+        </select>
+      </label>
+    </section>
+
+    <section>
+      <h2>Subtitle style</h2>
+      <label class="row">Font
+        <select id="st-font">
+          <option>Arial</option><option>Helvetica</option><option>Verdana</option>
+          <option>Trebuchet MS</option><option>Georgia</option><option>Times New Roman</option>
+          <option>Courier New</option><option>Impact</option><option>system-ui</option>
+        </select>
+      </label>
+      <label class="row">Size <input type="number" id="st-size" min="16" max="200" value="64"></label>
+      <label class="row">Bold <input type="checkbox" id="st-bold" checked></label>
+      <label class="row">Text color <input type="color" id="st-color" value="#ffffff"></label>
+      <label class="row">Outline color <input type="color" id="st-outline-color" value="#000000"></label>
+      <label class="row">Outline width <input type="range" id="st-outline" min="0" max="16" value="6"></label>
+      <label class="row">Position
+        <select id="st-position">
+          <option value="bottom" selected>Bottom</option>
+          <option value="middle">Middle</option>
+          <option value="top">Top</option>
+        </select>
+      </label>
+      <label class="row">Background dim <input type="range" id="st-dim" min="0" max="0.8" step="0.05" value="0.25"></label>
+    </section>
+  </aside>
+
+  <section class="center">
+    <div class="preview-wrap" id="preview-wrap">
+      <canvas id="preview"></canvas>
+    </div>
+    <div class="transport"><audio id="player" controls></audio></div>
+    <div class="wave-wrap" id="wave-wrap">
+      <canvas id="wave"></canvas>
+      <canvas id="wave-overlay"></canvas>
+    </div>
+    <p class="hint"><kbd>Space</kbd> play/pause · while tap-timing: <kbd>Space</kbd> stamps next line, <kbd>X</kbd> ends line, <kbd>Esc</kbd> stops</p>
+  </section>
+
+  <aside class="panel right">
+    <section>
+      <h2>Lyrics</h2>
+      <textarea id="lyrics-text" rows="6" placeholder="Paste lyrics here, one line per subtitle…"></textarea>
+      <div class="btn-row">
+        <button id="load-lines">Load lines</button>
+        <button id="tap-btn" class="primary">⏱ Tap timing</button>
+        <button id="clear-times">Clear times</button>
+      </div>
+      <ol id="line-list"></ol>
+    </section>
+  </aside>
+</main>
+
+<div id="cloud-popover" class="cloud-popover" hidden>
+  <div class="cloud-popover__header">
+    <h2>☁ Cloud projects</h2>
+    <button id="cloud-popover-close" aria-label="Close" title="Close">✕</button>
+  </div>
+  <div class="cloud-popover__body" id="cloud-popover-body"></div>
+</div>
+
+<div id="export-overlay" class="overlay" hidden>
+  <div class="overlay-box">
+    <h2>Exporting video…</h2>
+    <p>Recording in real time — this takes as long as the song. Keep this tab visible.</p>
+    <progress id="export-progress" max="1" value="0"></progress>
+    <p id="export-pct">0%</p>
+    <button id="export-cancel">Cancel</button>
+  </div>
+</div>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>

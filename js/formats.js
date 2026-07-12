@@ -76,6 +76,18 @@ export function lrcParse(text) {
   return clips;
 }
 
+// Relative time for Firestore timestamps ({seconds}); used by the cloud
+// library popover and the home screen's recent-projects list.
+export function relTime(ts) {
+  if (!ts?.seconds) return 'just now';
+  const s = Date.now() / 1000 - ts.seconds;
+  if (s < 90) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} minutes ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} hours ago`;
+  if (s < 172800) return 'yesterday';
+  return `${Math.round(s / 86400)} days ago`;
+}
+
 export function formatTime(t) {
   if (t == null) return '—';
   const m = Math.floor(t / 60);
