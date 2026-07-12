@@ -42,18 +42,53 @@ const waveform = new Waveform($('wave'), $('wave-overlay'), {
 
 // ---------- media loading ----------
 
-function setAudio(file) {
+const CLOUD_FILE_MSG =
+  'Couldn’t read this file. If it lives in an iCloud Drive / OneDrive folder, ' +
+  'it may be a cloud placeholder that isn’t downloaded to this computer yet — ' +
+  'in Finder, right-click it and choose “Download Now” (or copy it to a local ' +
+  'folder like Desktop), then try again.';
+
+// Cloud placeholders (evicted iCloud/OneDrive files) hand the browser a File
+// handle whose bytes aren't on disk: reads fail or come back empty. Fail
+// loudly up front instead of leaving a dead player.
+async function assertReadable(file) {
+  if (!file.size) throw new Error('file is empty');
+  await file.slice(0, 1).arrayBuffer();
+}
+
+async function setAudio(file) {
+  try {
+    await assertReadable(file);
+  } catch {
+    alert(CLOUD_FILE_MSG);
+    return;
+  }
   fileStore.set('music', file);
   upsertAsset('music', 'audio', file.name);
   project.tracks.music.clips = [{ assetId: 'music' }];
   els.player.src = URL.createObjectURL(file);
   els.audioName.textContent = `🎵 ${file.name}`;
   els.audioDrop.classList.add('loaded');
-  waveform.load(file).catch((e) => console.warn('waveform decode failed', e));
+  waveform.load(file).catch((e) => {
+    console.warn('waveform decode failed', e);
+    alert(`Couldn't decode "${file.name}" as audio — the file may be damaged or in an unsupported format.`);
+  });
 }
 
-function setBackground(file) {
-  const isImage = file.type.startsWith('image/');
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|avif)$/i;
+const AUDIO_EXT = /\.(mp3|wav|m4a|aac|ogg|oga|flac|opus)$/i;
+const VIDEO_EXT = /\.(mp4|mov|m4v|webm|mkv)$/i;
+
+async function setBackground(file) {
+  try {
+    await assertReadable(file);
+  } catch {
+    alert(CLOUD_FILE_MSG);
+    return;
+  }
+  // Cloud-synced files sometimes arrive with an empty MIME type; fall back
+  // to the extension.
+  const isImage = file.type ? file.type.startsWith('image/') : IMAGE_EXT.test(file.name);
   fileStore.set('bg', file);
   upsertAsset('bg', isImage ? 'image' : 'video', file.name);
   project.tracks.background.clips = [{ assetId: 'bg', fit: 'cover', loop: true }];
@@ -106,9 +141,19 @@ $('preview-wrap').addEventListener('dragover', (e) => e.preventDefault());
 $('preview-wrap').addEventListener('drop', (e) => {
   e.preventDefault();
   for (const f of e.dataTransfer.files) {
-    if (f.type.startsWith('audio/')) setAudio(f);
-    else if (f.type.startsWith('image/') || f.type.startsWith('video/')) setBackground(f);
+    if (f.type.startsWith('audio/') || AUDIO_EXT.test(f.name)) setAudio(f);
+    else if (
+      f.type.startsWith('image/') || f.type.startsWith('video/') ||
+      IMAGE_EXT.test(f.name) || VIDEO_EXT.test(f.name)
+    ) {
+      setBackground(f);
+    }
   }
+});
+
+// Surface playback failures (e.g. unsupported codec) instead of a dead player.
+els.player.addEventListener('error', () => {
+  if (els.player.src) alert('This audio file couldn’t be played by the browser. ' + CLOUD_FILE_MSG);
 });
 
 // Keep looping background video in sync with play/pause.
@@ -145,6 +190,24 @@ $('st-bold').addEventListener('change', (e) => {
   project.style.bold = e.target.checked;
 });
 
+// Web fonts load lazily; kick the load when picked so the canvas preview
+// switches over as soon as the font arrives (the rAF loop repaints).
+$('st-font').addEventListener('change', () => {
+  const f = project.style.fontFamily;
+  document.fonts.load(`700 64px "${f}"`).catch(() => {});
+  document.fonts.load(`400 64px "${f}"`).catch(() => {});
+});
+
+// ---------- intro & credits bindings ----------
+
+$('intro-on').addEventListener('change', (e) => (project.intro.enabled = e.target.checked));
+$('intro-title').addEventListener('input', (e) => (project.intro.title = e.target.value));
+$('intro-artist').addEventListener('input', (e) => (project.intro.artist = e.target.value));
+$('intro-dur').addEventListener('input', (e) => (project.intro.duration = Number(e.target.value)));
+$('outro-on').addEventListener('change', (e) => (project.outro.enabled = e.target.checked));
+$('outro-text').addEventListener('input', (e) => (project.outro.text = e.target.value));
+$('outro-dur').addEventListener('input', (e) => (project.outro.duration = Number(e.target.value)));
+
 function syncStyleUI() {
   const s = project.style;
   $('st-font').value = s.fontFamily;
@@ -156,6 +219,13 @@ function syncStyleUI() {
   $('st-position').value = s.position;
   $('st-dim').value = s.dim;
   els.resolution.value = `${project.canvas.width}x${project.canvas.height}`;
+  $('intro-on').checked = project.intro.enabled;
+  $('intro-title').value = project.intro.title;
+  $('intro-artist').value = project.intro.artist;
+  $('intro-dur').value = project.intro.duration;
+  $('outro-on').checked = project.outro.enabled;
+  $('outro-text').value = project.outro.text;
+  $('outro-dur').value = project.outro.duration;
 }
 
 // ---------- lyrics & timing ----------

@@ -45,6 +45,8 @@ aria attributes, and rewrite `css/style.css` completely** — but:
   `<input type="file">` — keep that pattern (click-to-open relies on it).
 - Style controls: `st-font`, `st-size`, `st-bold`, `st-color`,
   `st-outline-color`, `st-outline`, `st-position`, `st-dim`, `resolution`.
+- Intro & credits controls: `intro-on`, `intro-title`, `intro-artist`,
+  `intro-dur`, `outro-on`, `outro-text`, `outro-dur`.
 - Lyrics: `lyrics-text`, `load-lines`, `tap-btn`, `clear-times`, `line-list`.
 - Header actions: `save-project`, `load-project-btn`, `load-project`,
   `export-srt`, `export-lrc`, `import-subs-btn`, `import-subs`,

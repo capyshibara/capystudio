@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=Playfair+Display:wght@400;700&family=Cormorant+Garamond:wght@500;700&family=Lora:wght@400;700&family=Dancing+Script:wght@400;700&family=Bebas+Neue&display=swap">
 <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -63,9 +63,19 @@
       <h2>Subtitle style</h2>
       <label class="row">Font
         <select id="st-font">
-          <option>Arial</option><option>Helvetica</option><option>Verdana</option>
-          <option>Trebuchet MS</option><option>Georgia</option><option>Times New Roman</option>
-          <option>Courier New</option><option>Impact</option><option>system-ui</option>
+          <optgroup label="Artistic">
+            <option>Playfair Display</option>
+            <option>Cormorant Garamond</option>
+            <option>Lora</option>
+            <option>Dancing Script</option>
+            <option>Bebas Neue</option>
+            <option>Space Grotesk</option>
+          </optgroup>
+          <optgroup label="Classic">
+            <option>Arial</option><option>Helvetica</option><option>Verdana</option>
+            <option>Trebuchet MS</option><option>Georgia</option><option>Times New Roman</option>
+            <option>Courier New</option><option>Impact</option><option>system-ui</option>
+          </optgroup>
         </select>
       </label>
       <label class="row">Size <input type="number" id="st-size" min="16" max="200" value="64"></label>
@@ -81,6 +91,17 @@
         </select>
       </label>
       <label class="row">Background dim <input type="range" id="st-dim" min="0" max="0.8" step="0.05" value="0.25"></label>
+    </section>
+
+    <section>
+      <h2>Intro &amp; credits</h2>
+      <label class="row">Intro card <input type="checkbox" id="intro-on"></label>
+      <label class="row">Song title <input type="text" id="intro-title" placeholder="Song name"></label>
+      <label class="row">Artist <input type="text" id="intro-artist" placeholder="Artist"></label>
+      <label class="row">Intro seconds <input type="range" id="intro-dur" min="1" max="8" step="0.5" value="3"></label>
+      <label class="row">End credits <input type="checkbox" id="outro-on"></label>
+      <textarea id="outro-text" rows="3" placeholder="Credits — one line per row…"></textarea>
+      <label class="row">Credits seconds <input type="range" id="outro-dur" min="2" max="10" step="0.5" value="4"></label>
     </section>
   </aside>
 

@@ -31,8 +31,81 @@ export function drawFrame(ctx, state, t) {
     ctx.fillRect(0, 0, width, height);
   }
 
+  // Video elements take over the frame from lyrics while active.
+  const { intro, outro } = state.project;
+  if (intro?.enabled && t < intro.duration) {
+    const alpha = Math.min(1, t / 0.4, (intro.duration - t) / 0.6);
+    drawCard(ctx, introLines(intro, style), style, width, height, alpha);
+    return;
+  }
+  const dur = state.duration;
+  if (outro?.enabled && dur > 0 && t >= dur - outro.duration) {
+    const alpha = Math.min(1, (t - (dur - outro.duration)) / 0.6);
+    drawCard(ctx, outroLines(outro, style), style, width, height, alpha);
+    return;
+  }
+
   const line = activeLine(state.project.tracks.lyrics.clips, t, state.duration);
   if (line) drawLyric(ctx, line.text, style, width, height);
+}
+
+function introLines(intro, style) {
+  const lines = [];
+  if (intro.title) lines.push({ text: intro.title, size: style.fontSize * 1.4, bold: true });
+  if (intro.artist) lines.push({ text: intro.artist, size: style.fontSize * 0.7, bold: false });
+  return lines;
+}
+
+function outroLines(outro, style) {
+  return outro.text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((text) => ({ text, size: style.fontSize * 0.6, bold: false }));
+}
+
+// Centered multi-line card (intro / credits) with its own scrim, faded by
+// alpha. Uses the subtitle style's font and colors so the video reads as
+// one piece.
+function drawCard(ctx, lines, style, W, H, alpha) {
+  if (!lines.length) return;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.lineJoin = 'round';
+  ctx.miterLimit = 2;
+
+  const gap = style.fontSize * 0.5;
+  // Pre-wrap every line at its own size to measure total block height.
+  const blocks = lines.map((l) => {
+    ctx.font = `${l.bold ? '700' : '400'} ${l.size}px "${style.fontFamily}", sans-serif`;
+    const wrapped = wrapText(ctx, l.text, (W * style.maxWidthPct) / 100);
+    return { ...l, wrapped, lineH: l.size * style.lineHeight };
+  });
+  const blockH =
+    blocks.reduce((h, b) => h + b.wrapped.length * b.lineH, 0) + gap * (blocks.length - 1);
+
+  let y = (H - blockH) / 2;
+  for (const b of blocks) {
+    ctx.font = `${b.bold ? '700' : '400'} ${b.size}px "${style.fontFamily}", sans-serif`;
+    for (const ln of b.wrapped) {
+      y += b.size;
+      if (style.outlineWidth > 0) {
+        ctx.strokeStyle = style.outlineColor;
+        ctx.lineWidth = style.outlineWidth * 2 * (b.size / style.fontSize);
+        ctx.strokeText(ln, W / 2, y);
+      }
+      ctx.fillStyle = style.color;
+      ctx.fillText(ln, W / 2, y);
+      y += b.lineH - b.size;
+    }
+    y += gap;
+  }
+  ctx.restore();
 }
 
 function drawCover(ctx, el, W, H) {

@@ -40,6 +40,12 @@ export async function exportVideo({ canvas, audioEl, bgVideo, fps, onProgress })
   const mime = pickMimeType();
   if (!mime) throw new Error('This browser does not support video recording (MediaRecorder).');
 
+  // Make sure web fonts are in before recording starts, or early frames
+  // would render lyrics/intro in a fallback font.
+  try {
+    await document.fonts.ready;
+  } catch { /* non-fatal */ }
+
   const dest = ensureAudioGraph(audioEl);
   const stream = canvas.captureStream(fps);
   dest.stream.getAudioTracks().forEach((tr) => stream.addTrack(tr));

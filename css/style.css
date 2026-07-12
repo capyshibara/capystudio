@@ -312,6 +312,7 @@ label.row {
   margin-bottom: 10px;
 }
 label.row select,
+label.row input[type="text"],
 label.row input[type="number"] {
   background: var(--bg-2);
   color: var(--text-1);

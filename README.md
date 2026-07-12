@@ -17,9 +17,13 @@ leave your machine.
    **Space** exactly when each line should appear. Press **X** to end the
    current line early (instrumental gap), **Esc** to stop. Fine-tune any line
    with the per-line ⏱/⏹ buttons or by clicking the waveform to seek.
-5. **Style** — font, size, colors, outline, position, background dim. The
-   preview is exactly what gets exported.
-6. **⬇ Export video** — records in real time (a 3-minute song takes ~3 minutes;
+5. **Style** — font (including artistic serif/script web fonts), size,
+   colors, outline, position, background dim. The preview is exactly what
+   gets exported.
+6. **Intro & credits** (optional) — a title card with song name + artist at
+   the start, and end credits (one line per row) that fade in at the end.
+   Both use your subtitle style so the video reads as one piece.
+7. **⬇ Export video** — records in real time (a 3-minute song takes ~3 minutes;
    keep the tab visible). Output is **MP4 on Safari, WebM on Chrome/Firefox** —
    both upload fine to YouTube and most platforms.
 
@@ -34,6 +38,11 @@ Projects can also be saved to a per-user cloud library backed by Firebase
 is added — full step-by-step: [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md).
 Design prompts for restyling each screen live in
 [docs/DESIGN_PROMPTS.md](docs/DESIGN_PROMPTS.md).
+
+> **File won't load from iCloud Drive / OneDrive?** Cloud-synced folders often
+> keep only a placeholder on disk. In Finder, right-click the file →
+> **Download Now** (or copy it to a local folder like Desktop), then load it
+> again — the app will tell you when it hits one of these.
 
 ## Why real-time export?
 

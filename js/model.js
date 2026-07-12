@@ -25,6 +25,11 @@ export const project = {
     lineHeight: 1.25,
     dim: 0.25,          // dark overlay opacity over the background
   },
+  // Video elements: title card at the start, credits at the end. Both are
+  // drawn by the renderer (preview and export alike) using the subtitle
+  // style's font and colors.
+  intro: { enabled: false, title: '', artist: '', duration: 3 },
+  outro: { enabled: false, text: '', duration: 4 },
 };
 
 // File objects can't be serialized into the project JSON; they live here,
@@ -64,6 +69,8 @@ export function serializeProject() {
       assets: project.assets,
       tracks: project.tracks,
       style: project.style,
+      intro: project.intro,
+      outro: project.outro,
     },
     null,
     2
@@ -75,6 +82,8 @@ export function restoreProject(json) {
   if (!p || p.version !== 1) throw new Error('Unrecognized project file');
   project.canvas = { ...project.canvas, ...p.canvas };
   project.style = { ...project.style, ...p.style };
+  project.intro = { ...project.intro, ...p.intro };
+  project.outro = { ...project.outro, ...p.outro };
   project.assets = p.assets || [];
   project.tracks.lyrics.clips = p.tracks?.lyrics?.clips || [];
   // Background/music clips are restored too, but their files must be re-attached.
