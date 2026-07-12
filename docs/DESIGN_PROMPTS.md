@@ -117,6 +117,18 @@ each screen, run the QA walkthrough in `docs/DESIGN_BRIEF.md` §6 before moving 
 > as modifier classes, so it can be wired to `js/cloud.js` (which already
 > exposes list/load/delete) in a follow-up JS change. Do not wire JS yourself.
 
+## Screen 9 — Mobile editor shell (≤ 720px)
+
+> Design the mobile shell for the editor per `docs/MOBILE_BRIEF.md` (read it
+> fully first — it specifies the zones, the bottom tool bar with swappable
+> sheets, and the touch Timing mode with the large stamp button). Desktop
+> ≥ 720px must remain pixel-identical; all existing element ids survive —
+> sheets restyle the existing panel sections, they don't replace them.
+> Deliver the states: each sheet active, Timing-mode takeover (record-red
+> live treatment, big stamp / end-line / undo buttons, "Next:" ticker),
+> header overflow menu open, and export overlay with wake-lock note.
+> Respect `@media (hover: none)` rules: no hover-revealed controls on touch.
+
 ## Screen 8 — Home / module launcher (future, design ahead)
 
 > Design a future home screen for CapyStudio as static HTML/CSS in
