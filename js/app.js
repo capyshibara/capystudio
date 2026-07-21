@@ -265,14 +265,21 @@ function startTapping() {
   if (tapIndex === -1) tapIndex = 0;
   els.tapBtn.textContent = '⏹ Stop tapping';
   els.tapBtn.classList.add('active');
+  document.body.classList.add('timing-active');
+  $('tab-timing')?.classList.add('active');
+  $('timing-takeover').hidden = false;
   els.player.play();
   renderLineList();
+  updateTimingTicker();
 }
 
 function stopTapping() {
   tapping = false;
   els.tapBtn.textContent = '⏱ Tap timing';
   els.tapBtn.classList.remove('active');
+  document.body.classList.remove('timing-active');
+  $('tab-timing')?.classList.remove('active');
+  $('timing-takeover').hidden = true;
   renderLineList();
 }
 
@@ -284,6 +291,7 @@ function stampNext() {
   tapIndex++;
   if (tapIndex >= clips.length) stopTapping();
   renderLineList();
+  updateTimingTicker();
 }
 
 function endCurrent() {
@@ -294,6 +302,34 @@ function endCurrent() {
     renderLineList();
   }
 }
+
+function undoLastStamp() {
+  if (tapIndex <= 0) return;
+  const clips = lyricClips();
+  tapIndex--;
+  clips[tapIndex].start = null;
+  clips[tapIndex].end = null;
+  renderLineList();
+  updateTimingTicker();
+}
+
+// Mobile Timing-mode takeover: big stamp/end/undo buttons + a live ticker
+// of the just-stamped line and the next one up, so a phone user always
+// knows what they're about to tap without seeing the line list.
+function updateTimingTicker() {
+  const current = $('timing-current');
+  const next = $('timing-next-text');
+  if (!current || !next) return;
+  const clips = lyricClips();
+  const stamped = clips[tapIndex - 1];
+  current.textContent = stamped ? `"${stamped.text}"` : '—';
+  next.textContent = tapIndex < clips.length ? `"${clips[tapIndex].text}"` : '(done)';
+}
+
+$('stamp-btn')?.addEventListener('click', () => { if (tapping) stampNext(); });
+$('end-line-btn')?.addEventListener('click', () => { if (tapping) endCurrent(); });
+$('undo-btn')?.addEventListener('click', undoLastStamp);
+$('timing-exit')?.addEventListener('click', () => { if (tapping) stopTapping(); });
 
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, textarea, select') || exporting) return;
@@ -423,6 +459,21 @@ $('load-project').addEventListener('change', async (e) => {
 
 // ---------- video export ----------
 
+// A sleeping phone screen kills the real-time MediaRecorder export, so hold
+// a wake lock for the duration; harmless (and a no-op) where unsupported.
+let wakeLock = null;
+async function requestWakeLock() {
+  try {
+    wakeLock = await navigator.wakeLock?.request('screen');
+  } catch {
+    wakeLock = null;
+  }
+}
+function releaseWakeLock() {
+  wakeLock?.release().catch(() => {});
+  wakeLock = null;
+}
+
 $('export-video').addEventListener('click', async () => {
   if (!els.player.src) return alert('Load an audio file first.');
   if (!lyricClips().some((c) => c.start != null)) {
@@ -432,6 +483,7 @@ $('export-video').addEventListener('click', async () => {
   els.exportOverlay.hidden = false;
   els.exportProgress.value = 0;
   els.exportPct.textContent = '0%';
+  await requestWakeLock();
   try {
     const { blob, ext } = await exportVideo({
       canvas: els.preview,
@@ -450,6 +502,7 @@ $('export-video').addEventListener('click', async () => {
   } finally {
     exporting = false;
     els.exportOverlay.hidden = true;
+    releaseWakeLock();
   }
 });
 
@@ -663,6 +716,31 @@ if (cloudEnabled) {
     list: libShowList,
   };
 }
+
+// ---------- mobile shell: header overflow menu + bottom tool bar ----------
+
+$('header-menu-btn')?.addEventListener('click', () => {
+  const open = document.body.classList.toggle('menu-open');
+  $('header-menu-btn').setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('click', (e) => {
+  if (!document.body.classList.contains('menu-open')) return;
+  if (!e.target.closest('.header-actions') && !e.target.closest('#header-menu-btn')) {
+    document.body.classList.remove('menu-open');
+    $('header-menu-btn').setAttribute('aria-expanded', 'false');
+  }
+});
+
+const sheetButtons = document.querySelectorAll('#mobile-tabbar button[data-sheet]');
+sheetButtons.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.body.dataset.mobileSheet = btn.dataset.sheet;
+    sheetButtons.forEach((b) => b.classList.toggle('active', b === btn));
+  });
+});
+
+$('tab-timing')?.addEventListener('click', () => (tapping ? stopTapping() : startTapping()));
+$('tab-export')?.addEventListener('click', () => $('export-video').click());
 
 // ---------- render loop ----------
 

@@ -742,6 +742,7 @@ a.wordmark { text-decoration: none; }
   margin: 0 0 8px;
 }
 .overlay-box p { color: var(--text-2); font-size: 13px; line-height: 1.45; }
+.overlay-box .wake-lock-note { font-size: 12px; color: var(--text-3); }
 .overlay-box #export-pct { color: var(--text-1); font-variant-numeric: tabular-nums; }
 
 progress {
@@ -787,4 +788,215 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: var(--ra
   .panel.right { order: 3; }
   .preview-wrap { aspect-ratio: 16 / 9; flex: none; }
   .panel { max-height: none; overflow-y: visible; }
+}
+
+/* ---------- no-hover: always show controls that desktop reveals on :hover ---------- */
+
+@media (hover: none) {
+  .line-row .line-btns button { opacity: 1; }
+  .cloud-project__delete { opacity: 1; }
+}
+
+/* ---------- header overflow menu (mobile) ---------- */
+
+.header-menu-btn {
+  display: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  flex: none;
+}
+
+/* ---------- mobile bottom tool bar ---------- */
+
+.mobile-tabbar {
+  display: none;
+}
+
+/* ---------- timing takeover (mobile tap-timing) ---------- */
+
+.timing-takeover {
+  display: none;
+}
+
+/* =====================================================================
+   Mobile shell (CapCut-style): preview + transport pinned, one sheet at
+   a time below, contextual bottom tool bar. See docs/MOBILE_BRIEF.md.
+   ===================================================================== */
+
+@media (max-width: 720px) {
+  html { color-scheme: dark; }
+  body {
+    overflow: hidden;
+    height: 100vh;
+    height: 100dvh;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  /* -- header: wordmark + overflow menu, actions become a dropdown -- */
+  header { position: relative; padding: 6px 12px; min-height: 48px; }
+  .header-menu-btn { display: inline-flex; width: 44px; height: 44px; }
+  .header-actions {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 12px;
+    left: 12px;
+    z-index: 20;
+    margin-top: 6px;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-elevated);
+    padding: 10px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  body.menu-open .header-actions { display: flex; }
+  .header-actions .divider { display: none; }
+  .header-actions button { justify-content: flex-start; width: 100%; }
+  .header-actions .account { flex-direction: column; align-items: stretch; }
+  /* Export moves to the bottom tool bar; keep the element functional (it's
+     still clicked programmatically) but out of the overflow menu. */
+  #export-video { display: none; }
+
+  /* -- main: zone 1 (preview) + zone 2 (transport/wave) pinned, zone 3 scrolls -- */
+  main {
+    display: flex;
+    flex-direction: column;
+    padding: 8px;
+    gap: 8px;
+    overflow: hidden;
+    height: calc(100% - 48px);
+  }
+  .center { order: 1; flex: none; gap: 8px; }
+  .preview-wrap { aspect-ratio: 16 / 9; flex: none; }
+  .hint { display: none; }
+
+  .panel.left, .panel.right {
+    order: 2;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px;
+    gap: 0;
+    display: none;
+  }
+  .panel.left section, .panel.right section { display: none; }
+  body[data-mobile-sheet="media"] .panel.left { display: flex; }
+  body[data-mobile-sheet="media"] section[data-sheet="media"] { display: block; }
+  body[data-mobile-sheet="style"] .panel.left { display: flex; }
+  body[data-mobile-sheet="style"] section[data-sheet="style"] { display: block; }
+  body[data-mobile-sheet="intro"] .panel.left { display: flex; }
+  body[data-mobile-sheet="intro"] section[data-sheet="intro"] { display: block; }
+  body[data-mobile-sheet="lyrics"] .panel.right { display: flex; }
+  body[data-mobile-sheet="lyrics"] section[data-sheet="lyrics"] { display: block; }
+
+  .drop-hint { display: none; }
+
+  .line-row .line-btns button { width: 32px; height: 32px; font-size: 13px; }
+
+  /* -- bottom tool bar -- */
+  .mobile-tabbar {
+    display: flex;
+    order: 3;
+    flex: none;
+    gap: 2px;
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom, 0));
+    background: var(--bg-1);
+    border-top: 1px solid var(--line);
+    overflow-x: auto;
+  }
+  .mobile-tabbar button {
+    flex: 1 0 auto;
+    min-width: 56px;
+    height: 52px;
+    padding: 4px 6px;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 17px;
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+  }
+  .mobile-tabbar button span {
+    font-size: 10px;
+    font-weight: 500;
+    color: inherit;
+  }
+  .mobile-tabbar button.active,
+  .mobile-tabbar button[aria-pressed="true"] {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .mobile-tabbar button:hover { background: var(--bg-2); }
+  .mobile-tabbar button.active:hover { background: var(--accent-soft); }
+
+  /* -- timing mode takeover -- */
+  body.timing-active .panel.left,
+  body.timing-active .panel.right { display: none; }
+  body.timing-active .timing-takeover { display: flex; }
+
+  .timing-takeover {
+    order: 2;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 4px 4px;
+    position: relative;
+    flex: 1;
+    min-height: 0;
+  }
+  .timing-exit {
+    position: absolute;
+    top: 0;
+    right: 4px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: var(--radius-full);
+    background: var(--bg-2);
+  }
+  .timing-ticker { text-align: center; padding: 0 44px; }
+  .timing-current {
+    margin: 0 0 4px;
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-1);
+    line-height: 1.3;
+  }
+  .timing-next {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  #timing-next-text { color: var(--text-1); }
+
+  .timing-controls {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .timing-controls button {
+    height: 56px;
+    border-radius: var(--radius-lg);
+    font-size: 14px;
+  }
+  .timing-undo, .timing-end {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .timing-stamp {
+    flex: 2 1 0;
+    min-width: 40%;
+    font-size: 18px;
+    font-weight: 600;
+    background: var(--record);
+    background-image: none;
+    color: #1a0a0a;
+    border-color: var(--record);
+  }
 }

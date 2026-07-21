@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Lyric Video Maker · CapyStudio</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -10,9 +10,10 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=Playfair+Display:wght@400;700&family=Cormorant+Garamond:wght@500;700&family=Lora:wght@400;700&family=Dancing+Script:wght@400;700&family=Bebas+Neue&display=swap">
 <link rel="stylesheet" href="./css/style.css">
 </head>
-<body>
+<body data-mobile-sheet="media">
 <header>
   <h1><a class="wordmark" href="./" title="CapyStudio home">CapyStudio</a> <span class="module-name">Lyric Video Maker</span></h1>
+  <button id="header-menu-btn" class="header-menu-btn" aria-label="More actions" aria-expanded="false" title="More actions">⋯</button>
   <div class="header-actions">
     <button id="save-project" title="Save timings + style as a JSON project file">💾 Save project</button>
     <button id="load-project-btn" title="Load a saved project file">📂 Load project</button>
@@ -39,15 +40,15 @@
 
 <main>
   <aside class="panel left">
-    <section>
+    <section data-sheet="media">
       <h2>Media</h2>
       <label class="file-drop" id="audio-drop">
         <input type="file" id="audio-input" accept="audio/*">
-        <span id="audio-name">🎵 Choose audio (or drop here)</span>
+        <span id="audio-name">🎵 Choose audio<span class="drop-hint"> (or drop here)</span></span>
       </label>
       <label class="file-drop" id="bg-drop">
         <input type="file" id="bg-input" accept="image/*,video/*">
-        <span id="bg-name">🖼 Choose background image / video</span>
+        <span id="bg-name">🖼 Choose background image / video<span class="drop-hint"> (or drop here)</span></span>
       </label>
       <label class="row">Resolution
         <select id="resolution">
@@ -59,7 +60,7 @@
       </label>
     </section>
 
-    <section>
+    <section data-sheet="style">
       <h2>Subtitle style</h2>
       <label class="row">Font
         <select id="st-font">
@@ -93,7 +94,7 @@
       <label class="row">Background dim <input type="range" id="st-dim" min="0" max="0.8" step="0.05" value="0.25"></label>
     </section>
 
-    <section>
+    <section data-sheet="intro">
       <h2>Intro &amp; credits</h2>
       <label class="row">Intro card <input type="checkbox" id="intro-on"></label>
       <label class="row">Song title <input type="text" id="intro-title" placeholder="Song name"></label>
@@ -115,10 +116,23 @@
       <canvas id="wave-overlay"></canvas>
     </div>
     <p class="hint"><kbd>Space</kbd> play/pause · while tap-timing: <kbd>Space</kbd> stamps next line, <kbd>X</kbd> ends line, <kbd>Esc</kbd> stops</p>
+
+    <div class="timing-takeover" id="timing-takeover" hidden>
+      <button id="timing-exit" class="timing-exit" aria-label="Exit timing mode" title="Exit timing mode (Esc)">✕</button>
+      <div class="timing-ticker">
+        <p class="timing-current" id="timing-current">—</p>
+        <p class="timing-next">Next: <span id="timing-next-text">—</span></p>
+      </div>
+      <div class="timing-controls">
+        <button id="undo-btn" class="timing-undo" title="Undo last stamp">↩ Undo last</button>
+        <button id="stamp-btn" class="timing-stamp active" title="Stamp next line (Space)">⏱ Stamp</button>
+        <button id="end-line-btn" class="timing-end" title="End current line (X)">⏹ End line</button>
+      </div>
+    </div>
   </section>
 
   <aside class="panel right">
-    <section>
+    <section data-sheet="lyrics">
       <h2>Lyrics</h2>
       <textarea id="lyrics-text" rows="6" placeholder="Paste lyrics here, one line per subtitle…"></textarea>
       <div class="btn-row">
@@ -130,6 +144,15 @@
     </section>
   </aside>
 </main>
+
+<nav class="mobile-tabbar" id="mobile-tabbar">
+  <button data-sheet="media" class="active">🎵<span>Media</span></button>
+  <button data-sheet="lyrics">📝<span>Lyrics</span></button>
+  <button id="tab-timing" data-action="timing">⏱<span>Timing</span></button>
+  <button data-sheet="style">🎨<span>Style</span></button>
+  <button data-sheet="intro">🎬<span>Intro</span></button>
+  <button id="tab-export" data-action="export">⬇<span>Export</span></button>
+</nav>
 
 <div id="cloud-popover" class="cloud-popover" hidden>
   <div class="cloud-popover__header">
@@ -143,6 +166,7 @@
   <div class="overlay-box">
     <h2>Exporting video…</h2>
     <p>Recording in real time — this takes as long as the song. Keep this tab visible.</p>
+    <p class="wake-lock-note">On phones, keep the screen on and this tab in front — the recording pauses if the screen sleeps.</p>
     <progress id="export-progress" max="1" value="0"></progress>
     <p id="export-pct">0%</p>
     <button id="export-cancel">Cancel</button>

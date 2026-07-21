@@ -9,12 +9,22 @@ export class Waveform {
     this.peaks = null;
 
     const wrap = waveCanvas.parentElement;
-    wrap.addEventListener('click', (e) => {
+    const seekFromEvent = (e) => {
       const rect = wrap.getBoundingClientRect();
       const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
       const d = this.getDuration();
       if (d) onSeek(frac * d);
+    };
+    // Pointer events unify mouse click-to-seek and touch drag-scrub.
+    let dragging = false;
+    wrap.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      wrap.setPointerCapture(e.pointerId);
+      seekFromEvent(e);
     });
+    wrap.addEventListener('pointermove', (e) => { if (dragging) seekFromEvent(e); });
+    wrap.addEventListener('pointerup', () => { dragging = false; });
+    wrap.addEventListener('pointercancel', () => { dragging = false; });
 
     new ResizeObserver(() => this.redrawStatic()).observe(wrap);
   }
