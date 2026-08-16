@@ -1,5 +1,12 @@
 # CapyStudio Mobile — Layout Brief
 
+> **Implementation status (August 2026): shipped.** The editor now uses the
+> fixed preview → multi-track timeline → contextual bottom-tool layout from
+> this brief. The scope was expanded beyond the original shell proposal to
+> include multi-video import, sequential clip arrangement, trim/split/reorder,
+> multiple audio clips, timed styled text, canvas presets, and merged export.
+> The sections below are retained as the original research record.
+
 Why: the current responsive mode just stacks the three desktop panels into one
 long scrolling column. On a phone that means the preview scrolls out of view
 while you edit, timing requires a hardware keyboard (Space/X/Esc — impossible
@@ -83,10 +90,11 @@ Desktop timing is keyboard-driven. Mobile gets a **Timing mode takeover**:
 
 ## 4. Touch interaction rules
 
-- No hover anywhere: line-row micro-buttons and the cloud-popover delete are
-  always visible on touch (`@media (hover: none)`).
-- Hit targets ≥ 44×44px for primary controls, ≥ 32px for row micro-buttons.
-- The waveform strip is tap-to-seek (already works); add a drag-scrub.
+- No essential action depends on hover; contextual clip controls live in the
+  bottom sheet.
+- Primary phone controls use large touch targets and the bottom dock stays in
+  thumb reach.
+- The transport scrubber and timeline lanes support direct seeking.
 - File pickers: tap opens the native picker (drag & drop is desktop-only
   garnish); zone copy should say "Choose", not "drop".
 - During export, request a **screen Wake Lock** (`navigator.wakeLock`) and
@@ -95,23 +103,21 @@ Desktop timing is keyboard-driven. Mobile gets a **Timing mode takeover**:
   screen kills it.)
 - `viewport-fit=cover` + safe-area insets for the fixed bottom bar.
 
-## 5. Out of scope for the first mobile pass
+## 5. Remaining out of scope
 
-- No timeline clip-blocks (we have one audio + one background; the waveform
-  strip *is* our timeline until multi-track lands).
-- No pinch-zoom waveform, no direct-manipulation preview (nothing draggable
-  in the frame yet).
-- No feature additions from the CapCut inventory (transitions, stickers,
-  filters) — shell first; those live on the README roadmap already.
+- Direct manipulation of text inside the preview (drag, rotate, pinch-scale).
+- Transitions, stickers, filters/effects, speed ramps, and background removal.
+- Automatic captions and voice-over recording.
+- Server-side or faster-than-real-time rendering.
 
 ## 6. QA (mobile walkthrough, 375×812)
 
-1. Load audio + background via native pickers; both zones show loaded state.
-2. Preview stays visible while switching every sheet.
-3. Paste lyrics, load lines, enter Timing mode → stamp a whole song one-handed
-   with the big button; End line and Undo behave; exit restores the sheet.
-4. Line list: micro-buttons visible and tappable without hover; times update.
-5. Style change reflects live in the always-visible preview.
-6. Export: wake lock held, progress overlay readable, file downloads.
-7. No horizontal scroll; bottom bar clears the home-indicator safe area.
-8. Desktop (≥ 720px) is pixel-identical to today.
+1. Multi-select videos/photos in the native picker; every item becomes a
+   sequential Video-track block.
+2. Preview stays visible while the tool sheet opens and collapses.
+3. Select a video block; trim, split, move earlier/later, and undo.
+4. Add music; set its timeline start, trim, volume, and fades.
+5. Add text; set timing, style, position, and animation; preview updates live.
+6. Change canvas aspect and fit; clip order and total duration remain stable.
+7. Export: wake lock held, progress overlay readable, output downloads.
+8. No horizontal page scroll at 390×844; timeline itself scrolls as intended.

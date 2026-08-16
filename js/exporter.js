@@ -1,24 +1,25 @@
-// Video export: records the preview canvas + audio in real time with
-// MediaRecorder. 100% client-side — nothing is uploaded anywhere.
-// Output is MP4 where the browser supports recording it (Safari),
-// otherwise WebM (Chrome, Firefox). Both upload fine to YouTube etc.
+// Records the composited preview plus all active media audio in real time.
+// Everything stays in the browser; output is MP4 when supported, WebM otherwise.
 
-let audioCtx = null;
-let streamDest = null;
+let audioContext = null;
+let mixDestination = null;
 let currentJob = null;
+const connectedElements = new WeakSet();
 
-// createMediaElementSource may only be called once per element, so the
-// audio graph is built lazily and kept for the page lifetime.
-function ensureAudioGraph(audioEl) {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const src = audioCtx.createMediaElementSource(audioEl);
-    streamDest = audioCtx.createMediaStreamDestination();
-    src.connect(audioCtx.destination); // keep audible playback working
-    src.connect(streamDest);
+function ensureAudioMix(elements) {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    mixDestination = audioContext.createMediaStreamDestination();
   }
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  return streamDest;
+  for (const element of elements) {
+    if (!element || connectedElements.has(element)) continue;
+    const source = audioContext.createMediaElementSource(element);
+    source.connect(audioContext.destination);
+    source.connect(mixDestination);
+    connectedElements.add(element);
+  }
+  if (audioContext.state === 'suspended') audioContext.resume();
+  return mixDestination;
 }
 
 export function pickMimeType() {
@@ -29,90 +30,84 @@ export function pickMimeType() {
     'video/webm;codecs=vp8,opus',
     'video/webm',
   ];
-  return candidates.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || null;
+  return candidates.find((type) =>
+    window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || null;
 }
 
 export function cancelExport() {
   if (currentJob) currentJob.cancelled = true;
 }
 
-export async function exportVideo({ canvas, audioEl, bgVideo, fps, onProgress }) {
-  const mime = pickMimeType();
-  if (!mime) throw new Error('This browser does not support video recording (MediaRecorder).');
+export async function exportVideo({
+  canvas,
+  duration,
+  fps,
+  mediaElements,
+  startPlayback,
+  stopPlayback,
+  getCurrentTime,
+  onProgress,
+}) {
+  const mimeType = pickMimeType();
+  if (!mimeType) throw new Error('This browser does not support MediaRecorder video export.');
+  if (!duration) throw new Error('Add at least one video or photo before exporting.');
 
-  // Make sure web fonts are in before recording starts, or early frames
-  // would render lyrics/intro in a fallback font.
-  try {
-    await document.fonts.ready;
-  } catch { /* non-fatal */ }
+  // Build/resume the Web Audio graph before our first await so Safari still
+  // treats it as part of the user's Export-button gesture.
+  const destination = mediaElements.length ? ensureAudioMix(mediaElements) : null;
 
-  const dest = ensureAudioGraph(audioEl);
+  try { await document.fonts.ready; } catch { /* fallback fonts are acceptable */ }
+
   const stream = canvas.captureStream(fps);
-  dest.stream.getAudioTracks().forEach((tr) => stream.addTrack(tr));
+  if (destination) {
+    destination.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
+  }
 
   const recorder = new MediaRecorder(stream, {
-    mimeType: mime,
+    mimeType,
     videoBitsPerSecond: 10_000_000,
     audioBitsPerSecond: 192_000,
   });
   const chunks = [];
-  recorder.ondataavailable = (e) => {
-    if (e.data.size) chunks.push(e.data);
-  };
-  const stopped = new Promise((res) => (recorder.onstop = res));
+  recorder.addEventListener('dataavailable', (event) => {
+    if (event.data.size) chunks.push(event.data);
+  });
+  const stopped = new Promise((resolve, reject) => {
+    recorder.addEventListener('stop', resolve, { once: true });
+    recorder.addEventListener('error', () => reject(recorder.error), { once: true });
+  });
 
   const job = { cancelled: false };
   currentJob = job;
-
-  audioEl.pause();
-  audioEl.currentTime = 0;
-  if (bgVideo) {
-    try {
-      bgVideo.currentTime = 0;
-      await bgVideo.play();
-    } catch {
-      /* background video failing to autoplay is non-fatal */
-    }
-  }
-  await audioEl.play();
   recorder.start(500);
-
-  const progressTimer = setInterval(() => {
-    onProgress(Math.min(1, (audioEl.currentTime || 0) / (audioEl.duration || 1)));
-  }, 200);
+  await startPlayback(0);
 
   await new Promise((resolve) => {
-    const onEnded = () => {
-      cleanup();
-      resolve();
-    };
-    const poll = setInterval(() => {
-      if (job.cancelled) {
-        cleanup();
+    const timer = setInterval(() => {
+      const time = getCurrentTime();
+      onProgress(Math.min(1, time / duration));
+      if (job.cancelled || time >= duration) {
+        clearInterval(timer);
         resolve();
       }
-    }, 150);
-    const cleanup = () => {
-      clearInterval(poll);
-      audioEl.removeEventListener('ended', onEnded);
-    };
-    audioEl.addEventListener('ended', onEnded);
+    }, 100);
   });
 
-  clearInterval(progressTimer);
-  // Small grace period so the recorder captures the final frames.
-  await new Promise((r) => setTimeout(r, 300));
+  stopPlayback();
+  await new Promise((resolve) => setTimeout(resolve, 220));
   if (recorder.state !== 'inactive') recorder.stop();
-  audioEl.pause();
-  if (bgVideo) bgVideo.pause();
   await stopped;
   currentJob = null;
 
   if (job.cancelled) {
-    const err = new Error('Export cancelled');
-    err.cancelled = true;
-    throw err;
+    const error = new Error('Export cancelled');
+    error.cancelled = true;
+    throw error;
   }
+
   onProgress(1);
-  return { blob: new Blob(chunks, { type: mime }), ext: mime.includes('mp4') ? 'mp4' : 'webm' };
+  return {
+    blob: new Blob(chunks, { type: mimeType }),
+    ext: mimeType.includes('mp4') ? 'mp4' : 'webm',
+  };
 }

@@ -1,93 +1,81 @@
-# 🎬 CapyStudio
+# CapyStudio
 
-Browser-based media studio. First module: **Lyric Video Maker** — turn a song
-+ a background image (or looping video) + lyrics into a subtitled music video,
-entirely in your browser. No install, no upload, no server: your files never
-leave your machine.
+CapyStudio is a private, browser-based video editor built for phone footage.
+Select several videos or photos, arrange them into a story, add music and timed
+text, and export the result without uploading your media to a server.
 
-**Use it here: https://capyshibara.github.io/capystudio/**
+**Live app: https://capyshibara.github.io/capystudio/**
 
-## How to use
+## What the editor can do
 
-1. **Audio** — choose (or drag in) your song file.
-2. **Background** — choose an image or a short video (it loops automatically).
-3. **Lyrics** — paste them in the right panel, one line per subtitle, press
-   *Load lines*.
-4. **Tap timing** — press *⏱ Tap timing*: the song plays, and you press
-   **Space** exactly when each line should appear. Press **X** to end the
-   current line early (instrumental gap), **Esc** to stop. Fine-tune any line
-   with the per-line ⏱/⏹ buttons or by clicking the waveform to seek.
-5. **Style** — font (including artistic serif/script web fonts), size,
-   colors, outline, position, background dim. The preview is exactly what
-   gets exported.
-6. **Intro & credits** (optional) — a title card with song name + artist at
-   the start, and end credits (one line per row) that fade in at the end.
-   Both use your subtitle style so the video reads as one piece.
-7. **⬇ Export video** — records in real time (a 3-minute song takes ~3 minutes;
-   keep the tab visible). Output is **MP4 on Safari, WebM on Chrome/Firefox** —
-   both upload fine to YouTube and most platforms.
+- Import multiple videos and photos at once from a phone or computer.
+- Join visual clips sequentially on a three-track timeline.
+- Reorder, trim, split, resize, and delete video clips.
+- Control the original sound of each video clip.
+- Add one or more songs from the device, position and trim them, and adjust
+  volume plus fade-in/fade-out.
+- Add multiple timed text layers with font, size, color, backdrop, position,
+  and fade/pop animation controls.
+- Preview the complete edit with synchronized video, original audio, music,
+  and text.
+- Choose 9:16, 16:9, 1:1, or 4:5 output and 24/30/60 fps.
+- Save and reopen editable `.capy.json` project files. Browsers cannot embed
+  local media inside project JSON, so the original files are reattached after
+  opening a saved project.
+- Export the composited timeline as MP4 where the browser supports MP4
+  recording, otherwise WebM.
 
-Also available: **SRT / LRC export & import**, and **save/load project**
-(timings + style as JSON; media files are re-attached on load since browsers
-can't store them in the JSON).
+## Quick start
 
-## Optional cloud layer (Google sign-in)
+1. Open **Video Editor** and choose **Add videos or photos**.
+2. Select several items from the device picker. They appear one after another
+   on the Video track.
+3. Tap a clip to trim, split, change its original volume, move it earlier or
+   later, or delete it.
+4. Open **Audio** to add songs. Open **Text** to create timed titles or
+   captions at the playhead.
+5. Use **Canvas** for the target social format, preview the result, then choose
+   **Export**.
 
-Projects can also be saved to a per-user cloud library backed by Firebase
-(Auth + Firestore, free tier). The feature is dormant until a Firebase config
-is added — full step-by-step: [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md).
-Design prompts for restyling each screen live in
-[docs/DESIGN_PROMPTS.md](docs/DESIGN_PROMPTS.md).
+On phones the editor follows a preview → timeline → contextual tools layout.
+The tools collapse into a thumb-friendly bottom dock so the preview and
+timeline remain available while editing.
 
-> **File won't load from iCloud Drive / OneDrive?** Cloud-synced folders often
-> keep only a placeholder on disk. In Finder, right-click the file →
-> **Download Now** (or copy it to a local folder like Desktop), then load it
-> again — the app will tell you when it hits one of these.
+## Privacy and export
 
-## Why real-time export?
-
-GitHub Pages is static hosting — there is no server to run an encoder on.
-The app records its own preview canvas with the browser's built-in
-`MediaRecorder`, which runs at playback speed. Zero dependencies, works
-offline once loaded, and what you see is literally what you get.
+Media files are read through local browser file handles and are not uploaded by
+the editor. Export uses `MediaRecorder` on the composed canvas and mixed Web
+Audio output. It therefore runs in real time: a four-minute timeline takes
+about four minutes to export, and the tab should remain visible. CapyStudio
+requests a screen wake lock on supported mobile browsers during export.
 
 ## Development
 
-Static site, no build step. Serve the folder and open it:
+There is no build step or framework. Serve the repository and open the editor:
 
+```sh
+python3 serve.py
 ```
-python3 -m http.server 8000
-```
 
-Pages: `index.html` is the home/module launcher; the editor lives at
-`editor.html` (deep-linkable as `editor.html?project=<name>` to auto-open a
-cloud project after sign-in).
-
-Modules:
+The development URL is printed in the terminal (normally
+`http://127.0.0.1:8901/editor.html`).
 
 | File | Role |
 |---|---|
-| `js/home.js` | Home screen: recent cloud projects list |
-| `js/model.js` | Project state: assets / tracks / clips / style (serializable JSON) |
-| `js/renderer.js` | Pure canvas frame renderer — drives both preview and export |
-| `js/exporter.js` | MediaRecorder capture (canvas + Web Audio graph) |
-| `js/waveform.js` | Waveform strip, playhead, lyric markers, click-to-seek |
-| `js/formats.js` | SRT / LRC parse & stringify |
-| `js/app.js` | UI wiring |
+| `editor.html` | Editor shell, preview, timeline, tool dock, and export UI |
+| `js/model.js` | Versioned project model and timeline helpers |
+| `js/app.js` | Media loading, playback engine, editing controls, save/load |
+| `js/renderer.js` | Canvas compositor used by preview and export |
+| `js/exporter.js` | MediaRecorder and Web Audio export pipeline |
+| `css/style.css` | Desktop and CapCut-inspired mobile UI |
 
-The project model is deliberately track/clip/asset shaped rather than
-"one audio + one image", so the roadmap below extends it without a rewrite.
+## Current limitations
 
-## Roadmap
-
-- Word-level karaoke highlighting
-- Text animations (fade, slide, typewriter)
-- Auto-transcription timing via Whisper (WebGPU)
-- Multiple backgrounds per song section, with crossfade transitions
-- Ken Burns (slow zoom/pan) on still images
-- Audio-reactive visualizers (spectrum, waveform pulse)
-- Faster-than-real-time MP4 export via WebCodecs
-- Style presets / templates, batch export
+- Export is real-time and the available MP4/WebM format depends on the browser.
+- Media bytes are not embedded in saved project JSON.
+- Transitions, stickers/effects, speed ramps, automatic captions, and
+  voice-over recording are not part of this release yet.
+- Very large or long projects remain constrained by the phone/browser's memory.
 
 ## License
 
