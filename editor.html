@@ -2,152 +2,124 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Lyric Video Maker · CapyStudio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d12">
+<title>Video Editor · CapyStudio</title>
+<meta name="description" content="Merge phone videos, add music and text, and export — privately in your browser.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=Playfair+Display:wght@400;700&family=Cormorant+Garamond:wght@500;700&family=Lora:wght@400;700&family=Dancing+Script:wght@400;700&family=Bebas+Neue&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap">
 <link rel="stylesheet" href="./css/style.css">
 </head>
-<body>
-<header>
-  <h1><a class="wordmark" href="./" title="CapyStudio home">CapyStudio</a> <span class="module-name">Lyric Video Maker</span></h1>
+<body class="editor">
+<header class="editor-header">
+  <a class="back-link" href="./" aria-label="Back to CapyStudio home">‹</a>
+  <div class="project-heading">
+    <span class="wordmark">CapyStudio</span>
+    <input id="project-title" value="Untitled video" aria-label="Project title">
+  </div>
   <div class="header-actions">
-    <button id="save-project" title="Save timings + style as a JSON project file">💾 Save project</button>
-    <button id="load-project-btn" title="Load a saved project file">📂 Load project</button>
-    <input type="file" id="load-project" accept=".json" hidden>
-    <button id="export-srt" title="Download subtitles as .srt">SRT</button>
-    <button id="export-lrc" title="Download subtitles as .lrc">LRC</button>
-    <button id="import-subs-btn" title="Import .srt or .lrc subtitles">Import subs</button>
-    <input type="file" id="import-subs" accept=".srt,.lrc" hidden>
-    <span class="divider" aria-hidden="true"></span>
-    <div class="account" id="account">
-      <span id="user-chip" class="user-chip" hidden>
-        <img id="user-avatar" alt="" referrerpolicy="no-referrer">
-        <span id="user-name"></span>
-        <button id="sign-out" title="Sign out" aria-label="Sign out">✕</button>
-      </span>
-      <button id="cloud-save" hidden title="Save this project's timings + style to your account — media files stay on this device">☁ Save</button>
-      <button id="cloud-open" hidden title="Open a project saved to your account">☁ Open</button>
-      <button id="sign-in" hidden title="Sign in to save projects to the cloud">Sign in with Google</button>
-    </div>
-    <span class="divider" aria-hidden="true"></span>
-    <button id="export-video" class="primary">⬇ Export video</button>
+    <span class="privacy-pill" title="Your media stays on this device"><span aria-hidden="true">●</span> On-device</span>
+    <button id="save-project" class="quiet" title="Save editable project">Save</button>
+    <button id="load-project-btn" class="quiet" title="Load editable project">Open</button>
+    <input type="file" id="load-project" accept=".json,.capy.json" hidden>
+    <button id="export-video" class="primary export-button"><span aria-hidden="true">↑</span> Export</button>
   </div>
 </header>
 
-<main>
-  <aside class="panel left">
-    <section>
-      <h2>Media</h2>
-      <label class="file-drop" id="audio-drop">
-        <input type="file" id="audio-input" accept="audio/*">
-        <span id="audio-name">🎵 Choose audio (or drop here)</span>
-      </label>
-      <label class="file-drop" id="bg-drop">
-        <input type="file" id="bg-input" accept="image/*,video/*">
-        <span id="bg-name">🖼 Choose background image / video</span>
-      </label>
-      <label class="row">Resolution
-        <select id="resolution">
-          <option value="1920x1080" selected>1920 × 1080 (16:9)</option>
-          <option value="1280x720">1280 × 720 (16:9)</option>
-          <option value="1080x1920">1080 × 1920 (9:16 vertical)</option>
-          <option value="1080x1080">1080 × 1080 (square)</option>
-        </select>
-      </label>
-    </section>
-
-    <section>
-      <h2>Subtitle style</h2>
-      <label class="row">Font
-        <select id="st-font">
-          <optgroup label="Artistic">
-            <option>Playfair Display</option>
-            <option>Cormorant Garamond</option>
-            <option>Lora</option>
-            <option>Dancing Script</option>
-            <option>Bebas Neue</option>
-            <option>Space Grotesk</option>
-          </optgroup>
-          <optgroup label="Classic">
-            <option>Arial</option><option>Helvetica</option><option>Verdana</option>
-            <option>Trebuchet MS</option><option>Georgia</option><option>Times New Roman</option>
-            <option>Courier New</option><option>Impact</option><option>system-ui</option>
-          </optgroup>
-        </select>
-      </label>
-      <label class="row">Size <input type="number" id="st-size" min="16" max="200" value="64"></label>
-      <label class="row">Bold <input type="checkbox" id="st-bold" checked></label>
-      <label class="row">Text color <input type="color" id="st-color" value="#ffffff"></label>
-      <label class="row">Outline color <input type="color" id="st-outline-color" value="#000000"></label>
-      <label class="row">Outline width <input type="range" id="st-outline" min="0" max="16" value="6"></label>
-      <label class="row">Position
-        <select id="st-position">
-          <option value="bottom" selected>Bottom</option>
-          <option value="middle">Middle</option>
-          <option value="top">Top</option>
-        </select>
-      </label>
-      <label class="row">Background dim <input type="range" id="st-dim" min="0" max="0.8" step="0.05" value="0.25"></label>
-    </section>
-
-    <section>
-      <h2>Intro &amp; credits</h2>
-      <label class="row">Intro card <input type="checkbox" id="intro-on"></label>
-      <label class="row">Song title <input type="text" id="intro-title" placeholder="Song name"></label>
-      <label class="row">Artist <input type="text" id="intro-artist" placeholder="Artist"></label>
-      <label class="row">Intro seconds <input type="range" id="intro-dur" min="1" max="8" step="0.5" value="3"></label>
-      <label class="row">End credits <input type="checkbox" id="outro-on"></label>
-      <textarea id="outro-text" rows="3" placeholder="Credits — one line per row…"></textarea>
-      <label class="row">Credits seconds <input type="range" id="outro-dur" min="2" max="10" step="0.5" value="4"></label>
-    </section>
-  </aside>
-
-  <section class="center">
+<main class="editor-main">
+  <section class="preview-panel" aria-label="Video preview">
+    <div class="stage-meta">
+      <span id="format-label">9:16 · 1080p</span>
+      <button id="stage-add" class="quiet compact">+ Add media</button>
+    </div>
     <div class="preview-wrap" id="preview-wrap">
       <canvas id="preview"></canvas>
+      <button id="empty-add" class="empty-stage-action">
+        <span class="empty-stage-icon" aria-hidden="true">＋</span>
+        <strong>Add videos or photos</strong>
+        <small>Select several from your phone at once</small>
+      </button>
     </div>
-    <div class="transport"><audio id="player" controls></audio></div>
-    <div class="wave-wrap" id="wave-wrap">
-      <canvas id="wave"></canvas>
-      <canvas id="wave-overlay"></canvas>
+    <div class="transport" aria-label="Playback controls">
+      <button id="play-toggle" class="play-toggle" aria-label="Play"><span aria-hidden="true">▶</span></button>
+      <span id="current-time" class="timecode">00:00.0</span>
+      <input id="scrubber" type="range" min="0" max="0" step="0.01" value="0" aria-label="Timeline position">
+      <span id="duration-time" class="timecode muted">00:00.0</span>
+      <button id="undo" class="quiet icon-button" title="Undo" aria-label="Undo" disabled>↶</button>
+      <button id="redo" class="quiet icon-button" title="Redo" aria-label="Redo" disabled>↷</button>
     </div>
-    <p class="hint"><kbd>Space</kbd> play/pause · while tap-timing: <kbd>Space</kbd> stamps next line, <kbd>X</kbd> ends line, <kbd>Esc</kbd> stops</p>
   </section>
 
-  <aside class="panel right">
-    <section>
-      <h2>Lyrics</h2>
-      <textarea id="lyrics-text" rows="6" placeholder="Paste lyrics here, one line per subtitle…"></textarea>
-      <div class="btn-row">
-        <button id="load-lines">Load lines</button>
-        <button id="tap-btn" class="primary">⏱ Tap timing</button>
-        <button id="clear-times">Clear times</button>
+  <section class="timeline-panel" aria-label="Timeline">
+    <div class="timeline-header">
+      <div>
+        <strong>Timeline</strong>
+        <span id="timeline-summary">Add clips to start your story</span>
       </div>
-      <ol id="line-list"></ol>
-    </section>
+      <label class="zoom-control" title="Timeline zoom">−
+        <input id="timeline-zoom" type="range" min="18" max="80" value="36" aria-label="Timeline zoom">
+        +
+      </label>
+    </div>
+    <div id="timeline-scroll" class="timeline-scroll">
+      <div id="timeline-content" class="timeline-content">
+        <div id="timeline-ruler" class="timeline-ruler" aria-hidden="true"></div>
+        <div class="track-row video-row">
+          <span class="track-label"><b aria-hidden="true">▣</b> Video</span>
+          <div id="video-track" class="track-lane"></div>
+        </div>
+        <div class="track-row text-row">
+          <span class="track-label"><b aria-hidden="true">T</b> Text</span>
+          <div id="text-track" class="track-lane"></div>
+        </div>
+        <div class="track-row audio-row">
+          <span class="track-label"><b aria-hidden="true">♫</b> Audio</span>
+          <div id="audio-track" class="track-lane"></div>
+        </div>
+        <div id="timeline-playhead" class="timeline-playhead" aria-hidden="true"><span></span></div>
+      </div>
+    </div>
+  </section>
+
+  <aside id="inspector" class="inspector-panel open" aria-label="Editing tools">
+    <div class="inspector-top">
+      <div>
+        <span class="eyebrow">Tools</span>
+        <h2 id="inspector-title">Media</h2>
+      </div>
+      <button id="close-inspector" class="quiet icon-button" aria-label="Close tools">⌄</button>
+    </div>
+    <div id="inspector-content" class="inspector-content"></div>
+    <nav class="tool-dock" aria-label="Editor tools">
+      <button class="tool-button active" data-tool="media"><span aria-hidden="true">▣</span><small>Media</small></button>
+      <button class="tool-button" data-tool="edit"><span aria-hidden="true">✂</span><small>Edit</small></button>
+      <button class="tool-button" data-tool="audio"><span aria-hidden="true">♫</span><small>Audio</small></button>
+      <button class="tool-button" data-tool="text"><span aria-hidden="true">T</span><small>Text</small></button>
+      <button class="tool-button" data-tool="canvas"><span aria-hidden="true">▱</span><small>Canvas</small></button>
+    </nav>
   </aside>
 </main>
 
-<div id="cloud-popover" class="cloud-popover" hidden>
-  <div class="cloud-popover__header">
-    <h2>☁ Cloud projects</h2>
-    <button id="cloud-popover-close" aria-label="Close" title="Close">✕</button>
-  </div>
-  <div class="cloud-popover__body" id="cloud-popover-body"></div>
-</div>
+<input id="video-input" type="file" accept="video/*,image/*" multiple hidden>
+<input id="audio-input" type="file" accept="audio/*" multiple hidden>
 
 <div id="export-overlay" class="overlay" hidden>
-  <div class="overlay-box">
-    <h2>Exporting video…</h2>
-    <p>Recording in real time — this takes as long as the song. Keep this tab visible.</p>
+  <div class="overlay-box export-card">
+    <div class="export-orbit" aria-hidden="true">↑</div>
+    <h2>Creating your video</h2>
+    <p id="export-detail">Rendering the timeline in real time. Keep this tab visible.</p>
     <progress id="export-progress" max="1" value="0"></progress>
-    <p id="export-pct">0%</p>
-    <button id="export-cancel">Cancel</button>
+    <div class="export-progress-row">
+      <span id="export-pct">0%</span>
+      <span id="export-remaining">Starting…</span>
+    </div>
+    <button id="export-cancel" class="quiet">Cancel export</button>
   </div>
 </div>
+
+<div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
 <script type="module" src="./js/app.js"></script>
 </body>

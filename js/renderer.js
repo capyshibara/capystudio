@@ -1,172 +1,144 @@
-// Canvas frame renderer. Pure drawing: given project state + time, paint one
-// frame. The same function drives the live preview and the export recording,
-// so what you see is exactly what you get.
+// Pure canvas renderer shared by the live preview and MediaRecorder export.
 
-import { activeLine } from './model.js';
+import { activeTextAt } from './model.js';
 
-export function drawFrame(ctx, state, t) {
-  const { width, height } = state.project.canvas;
+export function drawFrame(ctx, state, time) {
+  const { project, visualEl } = state;
+  const { width, height, fit, background } = project.canvas;
   const canvas = ctx.canvas;
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
   }
 
-  ctx.fillStyle = '#0b0d12';
+  ctx.fillStyle = background || '#08090d';
   ctx.fillRect(0, 0, width, height);
 
-  if (state.bgEl) {
-    drawCover(ctx, state.bgEl, width, height);
+  if (visualEl && mediaReady(visualEl)) {
+    drawMedia(ctx, visualEl, width, height, fit);
   } else {
-    ctx.fillStyle = '#5b6478';
-    ctx.font = `500 ${Math.round(height / 24)}px system-ui`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('Add a background image or video', width / 2, height / 2);
+    drawEmpty(ctx, width, height);
   }
 
-  const style = state.project.style;
-  if (style.dim > 0 && state.bgEl) {
-    ctx.fillStyle = `rgba(0,0,0,${style.dim})`;
-    ctx.fillRect(0, 0, width, height);
+  for (const textClip of activeTextAt(time)) {
+    drawTextOverlay(ctx, textClip, width, height, time);
   }
-
-  // Video elements take over the frame from lyrics while active.
-  const { intro, outro } = state.project;
-  if (intro?.enabled && t < intro.duration) {
-    const alpha = Math.min(1, t / 0.4, (intro.duration - t) / 0.6);
-    drawCard(ctx, introLines(intro, style), style, width, height, alpha);
-    return;
-  }
-  const dur = state.duration;
-  if (outro?.enabled && dur > 0 && t >= dur - outro.duration) {
-    const alpha = Math.min(1, (t - (dur - outro.duration)) / 0.6);
-    drawCard(ctx, outroLines(outro, style), style, width, height, alpha);
-    return;
-  }
-
-  const line = activeLine(state.project.tracks.lyrics.clips, t, state.duration);
-  if (line) drawLyric(ctx, line.text, style, width, height);
 }
 
-function introLines(intro, style) {
-  const lines = [];
-  if (intro.title) lines.push({ text: intro.title, size: style.fontSize * 1.4, bold: true });
-  if (intro.artist) lines.push({ text: intro.artist, size: style.fontSize * 0.7, bold: false });
-  return lines;
+function mediaReady(el) {
+  if (el.tagName === 'IMG') return el.complete && el.naturalWidth;
+  return el.readyState >= 2 && el.videoWidth;
 }
 
-function outroLines(outro, style) {
-  return outro.text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((text) => ({ text, size: style.fontSize * 0.6, bold: false }));
-}
-
-// Centered multi-line card (intro / credits) with its own scrim, faded by
-// alpha. Uses the subtitle style's font and colors so the video reads as
-// one piece.
-function drawCard(ctx, lines, style, W, H, alpha) {
-  if (!lines.length) return;
-  ctx.save();
-  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.fillRect(0, 0, W, H);
-
+function drawEmpty(ctx, width, height) {
+  ctx.fillStyle = '#171922';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#6f768a';
+  ctx.font = `600 ${Math.max(24, Math.round(height / 34))}px Inter, system-ui`;
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Add videos or photos to begin', width / 2, height / 2);
+}
+
+function drawMedia(ctx, el, width, height, fit = 'cover') {
+  const sourceWidth = el.videoWidth || el.naturalWidth;
+  const sourceHeight = el.videoHeight || el.naturalHeight;
+  if (!sourceWidth || !sourceHeight) return;
+  const scale = fit === 'contain'
+    ? Math.min(width / sourceWidth, height / sourceHeight)
+    : Math.max(width / sourceWidth, height / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  ctx.drawImage(el, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+}
+
+function drawTextOverlay(ctx, clip, width, height, time) {
+  const style = clip.style || {};
+  const fontSize = Number(style.fontSize) || Math.round(height * 0.055);
+  const progressIn = Math.min(1, Math.max(0, (time - clip.start) / 0.24));
+  const progressOut = Math.min(1, Math.max(0, (clip.end - time) / 0.24));
+  const animation = style.animation || 'none';
+  const alpha = animation === 'fade' ? Math.min(progressIn, progressOut) : 1;
+  const scale = animation === 'pop' ? 0.82 + 0.18 * easeOutBack(progressIn) : 1;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(width / 2, textY(style.position, height));
+  ctx.scale(scale, scale);
+  ctx.font = `${style.bold === false ? '500' : '700'} ${fontSize}px "${style.fontFamily || 'Inter'}", system-ui`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round';
-  ctx.miterLimit = 2;
 
-  const gap = style.fontSize * 0.5;
-  // Pre-wrap every line at its own size to measure total block height.
-  const blocks = lines.map((l) => {
-    ctx.font = `${l.bold ? '700' : '400'} ${l.size}px "${style.fontFamily}", sans-serif`;
-    const wrapped = wrapText(ctx, l.text, (W * style.maxWidthPct) / 100);
-    return { ...l, wrapped, lineH: l.size * style.lineHeight };
-  });
-  const blockH =
-    blocks.reduce((h, b) => h + b.wrapped.length * b.lineH, 0) + gap * (blocks.length - 1);
+  const maxWidth = width * 0.84;
+  const lines = wrapText(ctx, clip.text || '', maxWidth);
+  const lineHeight = fontSize * 1.2;
+  const blockHeight = lines.length * lineHeight;
+  let y = -blockHeight / 2 + lineHeight / 2;
 
-  let y = (H - blockH) / 2;
-  for (const b of blocks) {
-    ctx.font = `${b.bold ? '700' : '400'} ${b.size}px "${style.fontFamily}", sans-serif`;
-    for (const ln of b.wrapped) {
-      y += b.size;
-      if (style.outlineWidth > 0) {
-        ctx.strokeStyle = style.outlineColor;
-        ctx.lineWidth = style.outlineWidth * 2 * (b.size / style.fontSize);
-        ctx.strokeText(ln, W / 2, y);
-      }
-      ctx.fillStyle = style.color;
-      ctx.fillText(ln, W / 2, y);
-      y += b.lineH - b.size;
-    }
-    y += gap;
+  if (style.background && style.background !== 'transparent') {
+    const measured = Math.min(maxWidth, Math.max(...lines.map((line) => ctx.measureText(line).width)));
+    const padX = fontSize * 0.38;
+    const padY = fontSize * 0.22;
+    ctx.fillStyle = style.background;
+    roundedRect(ctx, -measured / 2 - padX, -blockHeight / 2 - padY,
+      measured + padX * 2, blockHeight + padY * 2, fontSize * 0.2);
+    ctx.fill();
+  }
+
+  for (const line of lines) {
+    ctx.strokeStyle = 'rgba(0,0,0,0.72)';
+    ctx.lineWidth = Math.max(2, fontSize * 0.07);
+    ctx.strokeText(line, 0, y, maxWidth);
+    ctx.fillStyle = style.color || '#ffffff';
+    ctx.fillText(line, 0, y, maxWidth);
+    y += lineHeight;
   }
   ctx.restore();
 }
 
-function drawCover(ctx, el, W, H) {
-  const w = el.videoWidth || el.naturalWidth;
-  const h = el.videoHeight || el.naturalHeight;
-  if (!w || !h) return;
-  const scale = Math.max(W / w, H / h);
-  const dw = w * scale;
-  const dh = h * scale;
-  ctx.drawImage(el, (W - dw) / 2, (H - dh) / 2, dw, dh);
-}
-
-function drawLyric(ctx, text, style, W, H) {
-  const weight = style.bold ? '700' : '400';
-  ctx.font = `${weight} ${style.fontSize}px "${style.fontFamily}", sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
-
-  const maxWidth = (W * style.maxWidthPct) / 100;
-  const lines = wrapText(ctx, text, maxWidth);
-  const lineH = style.fontSize * style.lineHeight;
-  const blockH = lines.length * lineH;
-  const margin = (H * style.marginPct) / 100;
-
-  // y of the first line's baseline
-  let y;
-  if (style.position === 'top') {
-    y = margin + style.fontSize;
-  } else if (style.position === 'middle') {
-    y = (H - blockH) / 2 + style.fontSize;
-  } else {
-    y = H - margin - blockH + style.fontSize;
-  }
-
-  ctx.lineJoin = 'round';
-  ctx.miterLimit = 2;
-  for (const ln of lines) {
-    if (style.outlineWidth > 0) {
-      ctx.strokeStyle = style.outlineColor;
-      ctx.lineWidth = style.outlineWidth * 2;
-      ctx.strokeText(ln, W / 2, y);
-    }
-    ctx.fillStyle = style.color;
-    ctx.fillText(ln, W / 2, y);
-    y += lineH;
-  }
+function textY(position, height) {
+  if (position === 'top') return height * 0.18;
+  if (position === 'center') return height * 0.5;
+  return height * 0.82;
 }
 
 function wrapText(ctx, text, maxWidth) {
-  const words = text.split(/\s+/).filter(Boolean);
+  const paragraphs = String(text).split('\n');
   const lines = [];
-  let current = '';
-  for (const word of words) {
-    const candidate = current ? current + ' ' + word : word;
-    if (current && ctx.measureText(candidate).width > maxWidth) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = candidate;
+  for (const paragraph of paragraphs) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    let current = '';
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (current && ctx.measureText(candidate).width > maxWidth) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = candidate;
+      }
     }
+    lines.push(current || ' ');
   }
-  if (current) lines.push(current);
-  return lines.length ? lines : [''];
+  return lines.length ? lines : [' '];
+}
+
+function roundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.roundRect?.(x, y, width, height, r);
+  if (!ctx.roundRect) {
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + width, y, x + width, y + height, r);
+    ctx.arcTo(x + width, y + height, x, y + height, r);
+    ctx.arcTo(x, y + height, x, y, r);
+    ctx.arcTo(x, y, x + width, y, r);
+    ctx.closePath();
+  }
+}
+
+function easeOutBack(value) {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(value - 1, 3) + c1 * Math.pow(value - 1, 2);
 }

@@ -1,681 +1,1120 @@
-import { project, fileStore, lyricClips, serializeProject, restoreProject } from './model.js';
-import { srtStringify, srtParse, lrcStringify, lrcParse, formatTime, relTime } from './formats.js';
-import { drawFrame } from './renderer.js';
-import { Waveform } from './waveform.js';
-import { exportVideo, cancelExport } from './exporter.js';
 import {
-  cloudEnabled, initCloud, signIn, signOutUser,
-  saveProjectToCloud, listCloudProjects, loadProjectFromCloud, deleteCloudProject,
-} from './cloud.js';
+  project,
+  fileStore,
+  uid,
+  videoClips,
+  audioClips,
+  textClips,
+  clipDuration,
+  videoTimeline,
+  projectDuration,
+  activeVideoAt,
+  addAsset,
+  removeUnusedAssets,
+  serializeProject,
+  restoreProject,
+} from './model.js';
+import { drawFrame } from './renderer.js';
+import { exportVideo, cancelExport } from './exporter.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
-  player: $('player'),
   preview: $('preview'),
+  previewWrap: $('preview-wrap'),
+  emptyAdd: $('empty-add'),
+  stageAdd: $('stage-add'),
+  videoInput: $('video-input'),
   audioInput: $('audio-input'),
-  audioName: $('audio-name'),
-  audioDrop: $('audio-drop'),
-  bgInput: $('bg-input'),
-  bgName: $('bg-name'),
-  bgDrop: $('bg-drop'),
-  resolution: $('resolution'),
-  lyricsText: $('lyrics-text'),
-  lineList: $('line-list'),
-  tapBtn: $('tap-btn'),
+  play: $('play-toggle'),
+  currentTime: $('current-time'),
+  durationTime: $('duration-time'),
+  scrubber: $('scrubber'),
+  timelineScroll: $('timeline-scroll'),
+  timelineContent: $('timeline-content'),
+  timelineRuler: $('timeline-ruler'),
+  videoTrack: $('video-track'),
+  audioTrack: $('audio-track'),
+  textTrack: $('text-track'),
+  playhead: $('timeline-playhead'),
+  zoom: $('timeline-zoom'),
+  inspector: $('inspector'),
+  inspectorTitle: $('inspector-title'),
+  inspectorContent: $('inspector-content'),
+  projectTitle: $('project-title'),
+  formatLabel: $('format-label'),
+  timelineSummary: $('timeline-summary'),
+  undo: $('undo'),
+  redo: $('redo'),
   exportOverlay: $('export-overlay'),
   exportProgress: $('export-progress'),
   exportPct: $('export-pct'),
+  exportRemaining: $('export-remaining'),
+  toastRegion: $('toast-region'),
 };
 
-const ctx = els.preview.getContext('2d');
-let bgEl = null; // HTMLImageElement or HTMLVideoElement
-let tapping = false;
-let tapIndex = 0;
+const ctx = els.preview.getContext('2d', { alpha: false });
+const runtimeStore = new Map(); // asset id -> { el, url, kind, thumbnail }
+let currentTime = 0;
+let playing = false;
 let exporting = false;
+let clockStartedAt = 0;
+let timelineStartedAt = 0;
+let activeVideoClipId = null;
+let selected = null; // { type: 'video'|'audio'|'text', id }
+let activeTool = 'media';
+let timelineZoom = Number(els.zoom.value);
+let dragClipId = null;
+let wakeLock = null;
+const undoStack = [];
+const redoStack = [];
 
-const waveform = new Waveform($('wave'), $('wave-overlay'), {
-  getDuration: () => els.player.duration || 0,
-  onSeek: (t) => {
-    els.player.currentTime = t;
-  },
-});
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|avif|heic)$/i;
+const AUDIO_EXT = /\.(mp3|wav|m4a|aac|ogg|oga|flac|opus)$/i;
 
-// ---------- media loading ----------
+// ---------- small utilities ----------
 
-const CLOUD_FILE_MSG =
-  'Couldn’t read this file. If it lives in an iCloud Drive / OneDrive folder, ' +
-  'it may be a cloud placeholder that isn’t downloaded to this computer yet — ' +
-  'in Finder, right-click it and choose “Download Now” (or copy it to a local ' +
-  'folder like Desktop), then try again.';
+function escapeHTML(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
 
-// Cloud placeholders (evicted iCloud/OneDrive files) hand the browser a File
-// handle whose bytes aren't on disk: reads fail or come back empty. Fail
-// loudly up front instead of leaving a dead player.
+function formatTime(seconds, precise = true) {
+  const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+  const mins = Math.floor(safe / 60);
+  const secs = Math.floor(safe % 60);
+  const tenth = Math.floor((safe % 1) * 10);
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}${precise ? `.${tenth}` : ''}`;
+}
+
+function secondsLabel(seconds) {
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  return formatTime(seconds, false);
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, Number(value) || 0));
+}
+
+function toast(message, tone = 'normal') {
+  const item = document.createElement('div');
+  item.className = `toast ${tone}`;
+  item.textContent = message;
+  els.toastRegion.appendChild(item);
+  requestAnimationFrame(() => item.classList.add('show'));
+  setTimeout(() => {
+    item.classList.remove('show');
+    setTimeout(() => item.remove(), 180);
+  }, 2800);
+}
+
+function downloadBlob(blob, filename) {
+  const anchor = document.createElement('a');
+  anchor.href = URL.createObjectURL(blob);
+  anchor.download = filename;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(anchor.href), 30_000);
+}
+
+function safeFilename() {
+  return (project.title || 'capystudio-video')
+    .trim()
+    .replace(/[^a-z0-9-_]+/gi, '-')
+    .replace(/^-+|-+$/g, '') || 'capystudio-video';
+}
+
+function waitFor(element, eventName) {
+  return new Promise((resolve, reject) => {
+    const done = () => { cleanup(); resolve(); };
+    const fail = () => { cleanup(); reject(new Error('The browser could not read this media file.')); };
+    const cleanup = () => {
+      clearTimeout(timer);
+      element.removeEventListener(eventName, done);
+      element.removeEventListener('error', fail);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('Timed out while reading this media file.'));
+    }, 12_000);
+    element.addEventListener(eventName, done, { once: true });
+    element.addEventListener('error', fail, { once: true });
+  });
+}
+
 async function assertReadable(file) {
-  if (!file.size) throw new Error('file is empty');
+  if (!file?.size) throw new Error(`${file?.name || 'This file'} is empty or not downloaded to this device.`);
   await file.slice(0, 1).arrayBuffer();
 }
 
-async function setAudio(file) {
-  try {
-    await assertReadable(file);
-  } catch {
-    alert(CLOUD_FILE_MSG);
-    return;
-  }
-  fileStore.set('music', file);
-  upsertAsset('music', 'audio', file.name);
-  project.tracks.music.clips = [{ assetId: 'music' }];
-  els.player.src = URL.createObjectURL(file);
-  els.audioName.textContent = `🎵 ${file.name}`;
-  els.audioDrop.classList.add('loaded');
-  waveform.load(file).catch((e) => {
-    console.warn('waveform decode failed', e);
-    alert(`Couldn't decode "${file.name}" as audio — the file may be damaged or in an unsupported format.`);
-  });
+// ---------- history ----------
+
+function snapshot() {
+  return serializeProject();
 }
 
-const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|avif)$/i;
-const AUDIO_EXT = /\.(mp3|wav|m4a|aac|ogg|oga|flac|opus)$/i;
-const VIDEO_EXT = /\.(mp4|mov|m4v|webm|mkv)$/i;
+function remember(before) {
+  if (before === snapshot()) return;
+  undoStack.push(before);
+  if (undoStack.length > 40) undoStack.shift();
+  redoStack.length = 0;
+  updateHistoryButtons();
+}
 
-async function setBackground(file) {
-  try {
-    await assertReadable(file);
-  } catch {
-    alert(CLOUD_FILE_MSG);
-    return;
-  }
-  // Cloud-synced files sometimes arrive with an empty MIME type; fall back
-  // to the extension.
-  const isImage = file.type ? file.type.startsWith('image/') : IMAGE_EXT.test(file.name);
-  fileStore.set('bg', file);
-  upsertAsset('bg', isImage ? 'image' : 'video', file.name);
-  project.tracks.background.clips = [{ assetId: 'bg', fit: 'cover', loop: true }];
+function restoreSnapshot(json) {
+  const files = new Map(fileStore);
+  restoreProject(json);
+  for (const [id, file] of files) fileStore.set(id, file);
+  currentTime = clamp(currentTime, 0, projectDuration());
+  selected = null;
+  renderAll();
+  syncMedia(true);
+}
+
+function updateHistoryButtons() {
+  els.undo.disabled = !undoStack.length;
+  els.redo.disabled = !redoStack.length;
+}
+
+els.undo.addEventListener('click', () => {
+  if (!undoStack.length) return;
+  redoStack.push(snapshot());
+  restoreSnapshot(undoStack.pop());
+  updateHistoryButtons();
+});
+
+els.redo.addEventListener('click', () => {
+  if (!redoStack.length) return;
+  undoStack.push(snapshot());
+  restoreSnapshot(redoStack.pop());
+  updateHistoryButtons();
+});
+
+// ---------- media import ----------
+
+async function createRuntime(asset, file) {
+  if (runtimeStore.has(asset.id)) return runtimeStore.get(asset.id);
+  await assertReadable(file);
   const url = URL.createObjectURL(file);
-  if (isImage) {
-    const img = new Image();
-    img.src = url;
-    bgEl = img;
+  let runtime;
+
+  if (asset.kind === 'image') {
+    const image = new Image();
+    image.src = url;
+    if (!image.complete) await waitFor(image, 'load');
+    runtime = { el: image, url, kind: 'image', thumbnail: url, duration: 3 };
   } else {
-    const vid = document.createElement('video');
-    vid.src = url;
-    vid.muted = true;
-    vid.loop = true;
-    vid.playsInline = true;
-    vid.play().catch(() => {}); // may need a user gesture; retried on play
-    bgEl = vid;
+    const media = document.createElement(asset.kind === 'audio' ? 'audio' : 'video');
+    media.src = url;
+    media.preload = 'auto';
+    media.playsInline = true;
+    if (media.readyState < 1) await waitFor(media, 'loadedmetadata');
+    const duration = Number.isFinite(media.duration) ? media.duration : 0;
+    runtime = { el: media, url, kind: asset.kind, duration, thumbnail: null };
+    if (asset.kind === 'video') runtime.thumbnail = await createThumbnail(media);
   }
-  els.bgName.textContent = `🖼 ${file.name}`;
-  els.bgDrop.classList.add('loaded');
+
+  runtimeStore.set(asset.id, runtime);
+  return runtime;
 }
 
-function upsertAsset(id, kind, name) {
-  project.assets = project.assets.filter((a) => a.id !== id).concat({ id, kind, name });
+async function createThumbnail(video) {
+  try {
+    const target = Math.min(0.15, Math.max(0, video.duration / 3));
+    if (Math.abs(video.currentTime - target) > 0.01) {
+      video.currentTime = target;
+      await waitFor(video, 'seeked');
+    }
+    const thumb = document.createElement('canvas');
+    thumb.width = 180;
+    thumb.height = 100;
+    const tctx = thumb.getContext('2d');
+    const scale = Math.max(thumb.width / video.videoWidth, thumb.height / video.videoHeight);
+    const width = video.videoWidth * scale;
+    const height = video.videoHeight * scale;
+    tctx.drawImage(video, (thumb.width - width) / 2, (thumb.height - height) / 2, width, height);
+    video.currentTime = 0;
+    return thumb.toDataURL('image/jpeg', 0.72);
+  } catch {
+    return null;
+  }
 }
 
-els.audioInput.addEventListener('change', () => {
-  if (els.audioInput.files[0]) setAudio(els.audioInput.files[0]);
-});
-els.bgInput.addEventListener('change', () => {
-  if (els.bgInput.files[0]) setBackground(els.bgInput.files[0]);
-});
-
-// Drag & drop onto the two drop zones and the preview.
-for (const [zone, handler] of [
-  [els.audioDrop, setAudio],
-  [els.bgDrop, setBackground],
-]) {
-  zone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    zone.classList.add('dragover');
-  });
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-  zone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    zone.classList.remove('dragover');
-    if (e.dataTransfer.files[0]) handler(e.dataTransfer.files[0]);
-  });
+function visualKind(file) {
+  if (file.type?.startsWith('image/') || IMAGE_EXT.test(file.name)) return 'image';
+  return 'video';
 }
-$('preview-wrap').addEventListener('dragover', (e) => e.preventDefault());
-$('preview-wrap').addEventListener('drop', (e) => {
-  e.preventDefault();
-  for (const f of e.dataTransfer.files) {
-    if (f.type.startsWith('audio/') || AUDIO_EXT.test(f.name)) setAudio(f);
-    else if (
-      f.type.startsWith('image/') || f.type.startsWith('video/') ||
-      IMAGE_EXT.test(f.name) || VIDEO_EXT.test(f.name)
-    ) {
-      setBackground(f);
+
+async function importVisualFiles(files) {
+  if (!files.length) return;
+  pause();
+  const before = snapshot();
+  let added = 0;
+  let attached = 0;
+  for (const file of files) {
+    try {
+      const kind = visualKind(file);
+      const { asset, reattached } = addAsset(kind, file);
+      const runtime = await createRuntime(asset, file);
+      if (reattached) {
+        attached++;
+        continue;
+      }
+      const duration = kind === 'image' ? 3 : runtime.duration;
+      if (!duration) throw new Error(`${file.name} has no readable duration.`);
+      videoClips().push({
+        id: uid('video'),
+        assetId: asset.id,
+        name: file.name,
+        kind,
+        sourceDuration: duration,
+        duration,
+        trimStart: 0,
+        trimEnd: duration,
+        volume: 1,
+      });
+      added++;
+    } catch (error) {
+      console.warn('visual import failed', error);
+      toast(`${file.name}: ${error.message}`, 'error');
     }
   }
-});
-
-// Surface playback failures (e.g. unsupported codec) instead of a dead player.
-els.player.addEventListener('error', () => {
-  if (els.player.src) alert('This audio file couldn’t be played by the browser. ' + CLOUD_FILE_MSG);
-});
-
-// Keep looping background video in sync with play/pause.
-els.player.addEventListener('play', () => {
-  if (bgEl?.tagName === 'VIDEO') bgEl.play().catch(() => {});
-});
-els.player.addEventListener('pause', () => {
-  if (bgEl?.tagName === 'VIDEO' && !exporting) bgEl.pause();
-});
-
-// ---------- resolution & style bindings ----------
-
-els.resolution.addEventListener('change', () => {
-  const [w, h] = els.resolution.value.split('x').map(Number);
-  project.canvas.width = w;
-  project.canvas.height = h;
-});
-
-const styleBindings = [
-  ['st-font', 'fontFamily', (v) => v],
-  ['st-size', 'fontSize', Number],
-  ['st-color', 'color', (v) => v],
-  ['st-outline-color', 'outlineColor', (v) => v],
-  ['st-outline', 'outlineWidth', Number],
-  ['st-position', 'position', (v) => v],
-  ['st-dim', 'dim', Number],
-];
-for (const [id, key, coerce] of styleBindings) {
-  $(id).addEventListener('input', (e) => {
-    project.style[key] = coerce(e.target.value);
-  });
-}
-$('st-bold').addEventListener('change', (e) => {
-  project.style.bold = e.target.checked;
-});
-
-// Web fonts load lazily; kick the load when picked so the canvas preview
-// switches over as soon as the font arrives (the rAF loop repaints).
-$('st-font').addEventListener('change', () => {
-  const f = project.style.fontFamily;
-  document.fonts.load(`700 64px "${f}"`).catch(() => {});
-  document.fonts.load(`400 64px "${f}"`).catch(() => {});
-});
-
-// ---------- intro & credits bindings ----------
-
-$('intro-on').addEventListener('change', (e) => (project.intro.enabled = e.target.checked));
-$('intro-title').addEventListener('input', (e) => (project.intro.title = e.target.value));
-$('intro-artist').addEventListener('input', (e) => (project.intro.artist = e.target.value));
-$('intro-dur').addEventListener('input', (e) => (project.intro.duration = Number(e.target.value)));
-$('outro-on').addEventListener('change', (e) => (project.outro.enabled = e.target.checked));
-$('outro-text').addEventListener('input', (e) => (project.outro.text = e.target.value));
-$('outro-dur').addEventListener('input', (e) => (project.outro.duration = Number(e.target.value)));
-
-function syncStyleUI() {
-  const s = project.style;
-  $('st-font').value = s.fontFamily;
-  $('st-size').value = s.fontSize;
-  $('st-bold').checked = s.bold;
-  $('st-color').value = s.color;
-  $('st-outline-color').value = s.outlineColor;
-  $('st-outline').value = s.outlineWidth;
-  $('st-position').value = s.position;
-  $('st-dim').value = s.dim;
-  els.resolution.value = `${project.canvas.width}x${project.canvas.height}`;
-  $('intro-on').checked = project.intro.enabled;
-  $('intro-title').value = project.intro.title;
-  $('intro-artist').value = project.intro.artist;
-  $('intro-dur').value = project.intro.duration;
-  $('outro-on').checked = project.outro.enabled;
-  $('outro-text').value = project.outro.text;
-  $('outro-dur').value = project.outro.duration;
+  removeUnusedAssets();
+  remember(before);
+  currentTime = clamp(currentTime, 0, projectDuration());
+  renderAll();
+  syncMedia(true);
+  if (added) toast(`Added ${added} ${added === 1 ? 'clip' : 'clips'} to the timeline`, 'success');
+  else if (attached) toast(`Reattached ${attached} project ${attached === 1 ? 'file' : 'files'}`, 'success');
 }
 
-// ---------- lyrics & timing ----------
-
-$('load-lines').addEventListener('click', () => {
-  const rows = els.lyricsText.value
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (!rows.length) return alert('Paste some lyrics first — one line per subtitle.');
-  if (lyricClips().some((c) => c.start != null)) {
-    if (!confirm('Replace current lines? Existing timings will be lost.')) return;
-  }
-  project.tracks.lyrics.clips = rows.map((text) => ({ text, start: null, end: null }));
-  stopTapping();
-  renderLineList();
-});
-
-$('clear-times').addEventListener('click', () => {
-  if (!confirm('Clear all timings?')) return;
-  for (const c of lyricClips()) {
-    c.start = null;
-    c.end = null;
-  }
-  stopTapping();
-  renderLineList();
-});
-
-els.tapBtn.addEventListener('click', () => (tapping ? stopTapping() : startTapping()));
-
-function startTapping() {
-  const clips = lyricClips();
-  if (!clips.length) return alert('Load lyric lines first.');
-  if (!els.player.src) return alert('Load an audio file first.');
-  tapping = true;
-  tapIndex = clips.findIndex((c) => c.start == null);
-  if (tapIndex === -1) tapIndex = 0;
-  els.tapBtn.textContent = '⏹ Stop tapping';
-  els.tapBtn.classList.add('active');
-  els.player.play();
-  renderLineList();
-}
-
-function stopTapping() {
-  tapping = false;
-  els.tapBtn.textContent = '⏱ Tap timing';
-  els.tapBtn.classList.remove('active');
-  renderLineList();
-}
-
-function stampNext() {
-  const clips = lyricClips();
-  if (tapIndex >= clips.length) return stopTapping();
-  clips[tapIndex].start = els.player.currentTime;
-  clips[tapIndex].end = null;
-  tapIndex++;
-  if (tapIndex >= clips.length) stopTapping();
-  renderLineList();
-}
-
-function endCurrent() {
-  const clips = lyricClips();
-  const i = tapIndex - 1;
-  if (i >= 0 && clips[i].start != null) {
-    clips[i].end = els.player.currentTime;
-    renderLineList();
-  }
-}
-
-document.addEventListener('keydown', (e) => {
-  if (e.target.matches('input, textarea, select') || exporting) return;
-  if (e.code === 'Space') {
-    e.preventDefault();
-    if (tapping) stampNext();
-    else els.player.paused ? els.player.play() : els.player.pause();
-  } else if (tapping && (e.key === 'x' || e.key === 'X')) {
-    endCurrent();
-  } else if (e.key === 'Escape' && tapping) {
-    stopTapping();
-  }
-});
-
-function renderLineList() {
-  const clips = lyricClips();
-  els.lineList.innerHTML = '';
-  clips.forEach((c, i) => {
-    const li = document.createElement('li');
-    li.className = 'line-row';
-    if (tapping && i === tapIndex) li.classList.add('next-tap');
-
-    const text = document.createElement('input');
-    text.className = 'line-text';
-    text.value = c.text;
-    text.addEventListener('input', () => (c.text = text.value));
-
-    const times = document.createElement('span');
-    times.className = 'times';
-    times.textContent = `${formatTime(c.start)} → ${formatTime(c.end)}`;
-
-    const btns = document.createElement('span');
-    btns.className = 'line-btns';
-    for (const [label, title, fn] of [
-      ['▶', 'Seek to this line', () => c.start != null && (els.player.currentTime = c.start)],
-      ['⏱', 'Set start = current time', () => {
-        c.start = els.player.currentTime;
-        renderLineList();
-      }],
-      ['⏹', 'Set end = current time', () => {
-        c.end = els.player.currentTime;
-        renderLineList();
-      }],
-      ['✕', 'Clear times', () => {
-        c.start = null;
-        c.end = null;
-        renderLineList();
-      }],
-    ]) {
-      const b = document.createElement('button');
-      b.textContent = label;
-      b.title = title;
-      b.addEventListener('click', fn);
-      btns.appendChild(b);
+async function importAudioFiles(files) {
+  if (!files.length) return;
+  pause();
+  const before = snapshot();
+  let cursor = Math.min(currentTime, projectDuration());
+  let added = 0;
+  for (const file of files) {
+    try {
+      const { asset, reattached } = addAsset('audio', file);
+      const runtime = await createRuntime(asset, file);
+      if (reattached) continue;
+      if (!runtime.duration) throw new Error(`${file.name} has no readable duration.`);
+      audioClips().push({
+        id: uid('audio'),
+        assetId: asset.id,
+        name: file.name,
+        start: cursor,
+        sourceDuration: runtime.duration,
+        trimStart: 0,
+        trimEnd: runtime.duration,
+        volume: 0.75,
+        fadeIn: 0.4,
+        fadeOut: 0.7,
+      });
+      cursor += runtime.duration;
+      added++;
+    } catch (error) {
+      console.warn('audio import failed', error);
+      toast(`${file.name}: ${error.message}`, 'error');
     }
+  }
+  removeUnusedAssets();
+  remember(before);
+  renderAll();
+  syncMedia(true);
+  if (added) toast(`Added ${added} audio ${added === 1 ? 'track' : 'tracks'}`, 'success');
+}
 
-    li.append(text, times, btns);
-    els.lineList.appendChild(li);
+els.videoInput.addEventListener('change', async () => {
+  await importVisualFiles([...els.videoInput.files]);
+  els.videoInput.value = '';
+});
+els.audioInput.addEventListener('change', async () => {
+  await importAudioFiles([...els.audioInput.files]);
+  els.audioInput.value = '';
+});
+for (const trigger of [els.emptyAdd, els.stageAdd]) {
+  trigger.addEventListener('click', () => els.videoInput.click());
+}
+
+els.previewWrap.addEventListener('dragover', (event) => {
+  event.preventDefault();
+  els.previewWrap.classList.add('dragover');
+});
+els.previewWrap.addEventListener('dragleave', () => els.previewWrap.classList.remove('dragover'));
+els.previewWrap.addEventListener('drop', async (event) => {
+  event.preventDefault();
+  els.previewWrap.classList.remove('dragover');
+  const files = [...event.dataTransfer.files];
+  await importVisualFiles(files.filter((file) => !file.type.startsWith('audio/') && !AUDIO_EXT.test(file.name)));
+  await importAudioFiles(files.filter((file) => file.type.startsWith('audio/') || AUDIO_EXT.test(file.name)));
+});
+
+// ---------- playback engine ----------
+
+function sourceTimeFor(info, time) {
+  return info.clip.kind === 'image' ? 0 : info.clip.trimStart + (time - info.start);
+}
+
+function fadeVolume(clip, time) {
+  const local = time - clip.start;
+  const duration = clipDuration(clip);
+  let gain = 1;
+  if (clip.fadeIn > 0) gain = Math.min(gain, local / clip.fadeIn);
+  if (clip.fadeOut > 0) gain = Math.min(gain, (duration - local) / clip.fadeOut);
+  return clamp(clip.volume * Math.max(0, gain), 0, 1);
+}
+
+async function syncMedia(forceSeek = false) {
+  const promises = [];
+  const active = activeVideoAt(currentTime);
+  const changed = active?.clip.id !== activeVideoClipId;
+  if (changed) {
+    for (const runtime of runtimeStore.values()) {
+      if (runtime.kind === 'video') runtime.el.pause();
+    }
+    activeVideoClipId = active?.clip.id || null;
+  }
+
+  if (active) {
+    const runtime = runtimeStore.get(active.clip.assetId);
+    if (runtime?.kind === 'video') {
+      const desired = sourceTimeFor(active, currentTime);
+      runtime.el.volume = clamp(active.clip.volume, 0, 1);
+      if (changed || forceSeek || Math.abs(runtime.el.currentTime - desired) > 0.28) {
+        try { runtime.el.currentTime = desired; } catch { /* metadata may still be settling */ }
+      }
+      if (playing && runtime.el.paused) promises.push(runtime.el.play().catch(() => {}));
+      if (!playing && !runtime.el.paused) runtime.el.pause();
+    }
+  }
+
+  const activeAudioAssets = new Set();
+  for (const clip of audioClips()) {
+    const duration = clipDuration(clip);
+    if (currentTime < clip.start || currentTime >= clip.start + duration) continue;
+    const runtime = runtimeStore.get(clip.assetId);
+    if (!runtime) continue;
+    activeAudioAssets.add(clip.assetId);
+    const desired = clip.trimStart + (currentTime - clip.start);
+    runtime.el.volume = fadeVolume(clip, currentTime);
+    if (forceSeek || runtime.el.dataset.activeClip !== clip.id || Math.abs(runtime.el.currentTime - desired) > 0.28) {
+      try { runtime.el.currentTime = desired; } catch { /* non-fatal */ }
+    }
+    runtime.el.dataset.activeClip = clip.id;
+    if (playing && runtime.el.paused) promises.push(runtime.el.play().catch(() => {}));
+    if (!playing && !runtime.el.paused) runtime.el.pause();
+  }
+  for (const [assetId, runtime] of runtimeStore) {
+    if (runtime.kind === 'audio' && !activeAudioAssets.has(assetId)) {
+      runtime.el.pause();
+      delete runtime.el.dataset.activeClip;
+    }
+  }
+  await Promise.all(promises);
+}
+
+async function play(from = currentTime) {
+  const duration = projectDuration();
+  if (!duration) return toast('Add a video or photo first');
+  currentTime = from >= duration ? 0 : clamp(from, 0, duration);
+  timelineStartedAt = currentTime;
+  clockStartedAt = performance.now();
+  playing = true;
+  els.play.classList.add('playing');
+  els.play.querySelector('span').textContent = '❚❚';
+  els.play.setAttribute('aria-label', 'Pause');
+  await syncMedia(true);
+}
+
+function pause() {
+  if (playing) currentTime = Math.min(projectDuration(), timelineStartedAt + (performance.now() - clockStartedAt) / 1000);
+  playing = false;
+  els.play.classList.remove('playing');
+  els.play.querySelector('span').textContent = '▶';
+  els.play.setAttribute('aria-label', 'Play');
+  syncMedia(false);
+}
+
+function seek(time) {
+  currentTime = clamp(time, 0, projectDuration());
+  if (playing) {
+    timelineStartedAt = currentTime;
+    clockStartedAt = performance.now();
+  }
+  syncMedia(true);
+  updateTransport();
+}
+
+els.play.addEventListener('click', () => playing ? pause() : play());
+els.scrubber.addEventListener('input', () => seek(Number(els.scrubber.value)));
+
+document.addEventListener('keydown', (event) => {
+  if (event.target.matches('input, textarea, select') || exporting) return;
+  if (event.code === 'Space') {
+    event.preventDefault();
+    playing ? pause() : play();
+  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault();
+    seek(currentTime + (event.key === 'ArrowLeft' ? -0.25 : 0.25));
+  }
+});
+
+function activeVisualElement() {
+  const info = activeVideoAt(currentTime);
+  return info ? runtimeStore.get(info.clip.assetId)?.el || null : null;
+}
+
+function updateTransport() {
+  const duration = projectDuration();
+  els.scrubber.max = duration || 0;
+  els.scrubber.value = Math.min(currentTime, duration || 0);
+  els.currentTime.textContent = formatTime(currentTime);
+  els.durationTime.textContent = formatTime(duration);
+  els.playhead.style.left = `${64 + currentTime * timelineZoom}px`;
+}
+
+function renderLoop(now) {
+  if (playing) {
+    currentTime = timelineStartedAt + (now - clockStartedAt) / 1000;
+    if (currentTime >= projectDuration()) {
+      currentTime = projectDuration();
+      pause();
+    } else {
+      syncMedia(false);
+    }
+  }
+  drawFrame(ctx, { project, visualEl: activeVisualElement() }, currentTime);
+  updateTransport();
+  requestAnimationFrame(renderLoop);
+}
+
+// ---------- timeline ----------
+
+function selectItem(type, id) {
+  selected = { type, id };
+  activeTool = 'edit';
+  els.inspector.classList.add('open');
+  renderTimeline();
+  renderInspector();
+}
+
+function timelineBlock({ type, clip, start, duration, label, sublabel, thumbnail }) {
+  const block = document.createElement('button');
+  block.className = `timeline-clip ${type}-clip${selected?.type === type && selected.id === clip.id ? ' selected' : ''}`;
+  block.style.left = `${start * timelineZoom}px`;
+  block.style.width = `${Math.max(type === 'video' ? 52 : 34, duration * timelineZoom)}px`;
+  block.dataset.id = clip.id;
+  block.title = `${label} · ${secondsLabel(duration)}`;
+  if (thumbnail) block.style.setProperty('--thumb', `url("${thumbnail}")`);
+  block.innerHTML = `<span class="clip-grip" aria-hidden="true"></span><span class="clip-copy"><strong>${escapeHTML(label)}</strong><small>${escapeHTML(sublabel)}</small></span>`;
+  block.addEventListener('click', (event) => {
+    event.stopPropagation();
+    selectItem(type, clip.id);
+    seek(start);
+  });
+  if (type === 'video') {
+    block.draggable = true;
+    block.addEventListener('dragstart', () => { dragClipId = clip.id; block.classList.add('dragging'); });
+    block.addEventListener('dragend', () => { dragClipId = null; block.classList.remove('dragging'); });
+    block.addEventListener('dragover', (event) => event.preventDefault());
+    block.addEventListener('drop', (event) => {
+      event.preventDefault();
+      reorderVideo(dragClipId, clip.id);
+    });
+  }
+  return block;
+}
+
+function reorderVideo(sourceId, targetId) {
+  if (!sourceId || sourceId === targetId) return;
+  const clips = videoClips();
+  const sourceIndex = clips.findIndex((clip) => clip.id === sourceId);
+  const targetIndex = clips.findIndex((clip) => clip.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+  const before = snapshot();
+  const [moved] = clips.splice(sourceIndex, 1);
+  clips.splice(targetIndex, 0, moved);
+  remember(before);
+  renderAll();
+  syncMedia(true);
+}
+
+function renderRuler(duration, width) {
+  els.timelineRuler.innerHTML = '';
+  els.timelineRuler.style.width = `${width}px`;
+  const step = timelineZoom >= 55 ? 1 : timelineZoom >= 30 ? 2 : 5;
+  for (let second = 0; second <= Math.ceil(duration); second += step) {
+    const tick = document.createElement('span');
+    tick.className = 'ruler-tick';
+    tick.style.left = `${second * timelineZoom}px`;
+    tick.textContent = formatTime(second, false);
+    els.timelineRuler.appendChild(tick);
+  }
+}
+
+function renderTimeline() {
+  const timeline = videoTimeline();
+  const duration = projectDuration();
+  const minWidth = Math.max(560, els.timelineScroll.clientWidth - 72);
+  const trackWidth = Math.max(minWidth, Math.ceil(duration * timelineZoom) + 80);
+  els.timelineContent.style.width = `${trackWidth + 64}px`;
+  for (const lane of [els.videoTrack, els.audioTrack, els.textTrack]) {
+    lane.innerHTML = '';
+    lane.style.width = `${trackWidth}px`;
+  }
+  renderRuler(duration, trackWidth);
+
+  for (const item of timeline) {
+    const runtime = runtimeStore.get(item.clip.assetId);
+    els.videoTrack.appendChild(timelineBlock({
+      type: 'video',
+      clip: item.clip,
+      start: item.start,
+      duration: item.duration,
+      label: item.clip.name,
+      sublabel: `${timeline.indexOf(item) + 1} · ${secondsLabel(item.duration)}`,
+      thumbnail: runtime?.thumbnail,
+    }));
+  }
+  for (const clip of textClips()) {
+    els.textTrack.appendChild(timelineBlock({
+      type: 'text', clip, start: clip.start, duration: clip.end - clip.start,
+      label: clip.text || 'Text', sublabel: `${secondsLabel(clip.end - clip.start)}`,
+    }));
+  }
+  for (const clip of audioClips()) {
+    els.audioTrack.appendChild(timelineBlock({
+      type: 'audio', clip, start: clip.start, duration: clipDuration(clip),
+      label: clip.name, sublabel: `${Math.round(clip.volume * 100)}% · ${secondsLabel(clipDuration(clip))}`,
+    }));
+  }
+
+  els.timelineSummary.textContent = videoClips().length
+    ? `${videoClips().length} ${videoClips().length === 1 ? 'clip' : 'clips'} · ${formatTime(duration, false)}`
+    : 'Add clips to start your story';
+  els.emptyAdd.hidden = !!videoClips().length;
+  updateTransport();
+}
+
+for (const lane of [els.videoTrack, els.audioTrack, els.textTrack]) {
+  lane.addEventListener('click', (event) => {
+    if (event.target !== lane) return;
+    const rect = lane.getBoundingClientRect();
+    seek((event.clientX - rect.left) / timelineZoom);
   });
 }
 
-// ---------- import / export ----------
-
-function downloadBlob(blob, filename) {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
-}
-
-function baseName() {
-  const audio = project.assets.find((a) => a.id === 'music');
-  return audio ? audio.name.replace(/\.[^.]+$/, '') : 'lyric-video';
-}
-
-$('export-srt').addEventListener('click', () => {
-  const s = srtStringify(lyricClips(), els.player.duration);
-  if (!s) return alert('No timed lines to export yet.');
-  downloadBlob(new Blob([s], { type: 'text/plain' }), baseName() + '.srt');
+els.zoom.addEventListener('input', () => {
+  timelineZoom = Number(els.zoom.value);
+  renderTimeline();
 });
 
-$('export-lrc').addEventListener('click', () => {
-  const s = lrcStringify(lyricClips());
-  if (!s) return alert('No timed lines to export yet.');
-  downloadBlob(new Blob([s], { type: 'text/plain' }), baseName() + '.lrc');
-});
+// ---------- inspector ----------
 
-$('import-subs-btn').addEventListener('click', () => $('import-subs').click());
-$('import-subs').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const text = await file.text();
-  const clips = file.name.toLowerCase().endsWith('.lrc') ? lrcParse(text) : srtParse(text);
-  if (!clips.length) return alert('No subtitle lines found in that file.');
-  project.tracks.lyrics.clips = clips;
-  els.lyricsText.value = clips.map((c) => c.text).join('\n');
-  renderLineList();
-  e.target.value = '';
+function toolTitle() {
+  return { media: 'Media', edit: 'Clip editor', audio: 'Audio', text: 'Text', canvas: 'Canvas' }[activeTool];
+}
+
+function setTool(tool) {
+  activeTool = tool;
+  els.inspector.classList.add('open');
+  renderInspector();
+}
+
+document.querySelectorAll('.tool-button').forEach((button) => {
+  button.addEventListener('click', () => setTool(button.dataset.tool));
+});
+$('close-inspector').addEventListener('click', () => els.inspector.classList.remove('open'));
+
+function inspectorEmpty(message) {
+  return `<div class="inspector-empty"><span aria-hidden="true">◇</span><p>${escapeHTML(message)}</p></div>`;
+}
+
+function renderInspector() {
+  els.inspectorTitle.textContent = toolTitle();
+  document.querySelectorAll('.tool-button').forEach((button) =>
+    button.classList.toggle('active', button.dataset.tool === activeTool));
+
+  if (activeTool === 'media') renderMediaInspector();
+  else if (activeTool === 'audio') renderAudioInspector();
+  else if (activeTool === 'text') renderTextInspector();
+  else if (activeTool === 'canvas') renderCanvasInspector();
+  else renderEditInspector();
+}
+
+function renderMediaInspector() {
+  els.inspectorContent.innerHTML = `
+    <button class="import-card primary-card" id="add-visuals">
+      <span class="import-icon" aria-hidden="true">＋</span>
+      <span><strong>Add videos or photos</strong><small>Choose several clips from your phone</small></span>
+    </button>
+    <p class="section-label">Story order</p>
+    <div class="asset-list" id="visual-list"></div>
+    <p class="privacy-note"><span aria-hidden="true">●</span> Files are edited locally and never uploaded.</p>`;
+  $('add-visuals').addEventListener('click', () => els.videoInput.click());
+  const list = $('visual-list');
+  if (!videoClips().length) {
+    list.innerHTML = inspectorEmpty('Your clips will appear here in playback order.');
+    return;
+  }
+  videoTimeline().forEach((item, index) => {
+    const button = document.createElement('button');
+    button.className = 'asset-row';
+    button.innerHTML = `<span class="asset-index">${index + 1}</span><span class="asset-copy"><strong>${escapeHTML(item.clip.name)}</strong><small>${item.clip.kind === 'image' ? 'Photo' : 'Video'} · ${secondsLabel(item.duration)}</small></span><span aria-hidden="true">›</span>`;
+    button.addEventListener('click', () => { selectItem('video', item.clip.id); seek(item.start); });
+    list.appendChild(button);
+  });
+}
+
+function renderAudioInspector() {
+  els.inspectorContent.innerHTML = `
+    <button class="import-card audio-card" id="add-audio">
+      <span class="import-icon" aria-hidden="true">♫</span>
+      <span><strong>Add music</strong><small>Choose one or more songs from this device</small></span>
+    </button>
+    <p class="section-label">Audio track</p>
+    <div class="asset-list" id="audio-list"></div>`;
+  $('add-audio').addEventListener('click', () => els.audioInput.click());
+  const list = $('audio-list');
+  if (!audioClips().length) {
+    list.innerHTML = inspectorEmpty('Music is placed at the playhead, then arranged one after another.');
+    return;
+  }
+  audioClips().forEach((clip) => {
+    const button = document.createElement('button');
+    button.className = 'asset-row';
+    button.innerHTML = `<span class="asset-icon audio">♫</span><span class="asset-copy"><strong>${escapeHTML(clip.name)}</strong><small>${formatTime(clip.start)} · ${Math.round(clip.volume * 100)}%</small></span><span aria-hidden="true">›</span>`;
+    button.addEventListener('click', () => { selectItem('audio', clip.id); seek(clip.start); });
+    list.appendChild(button);
+  });
+}
+
+function addTextClip() {
+  if (!projectDuration()) return toast('Add a video or photo before adding text');
+  const before = snapshot();
+  const start = Math.min(currentTime, Math.max(0, projectDuration() - 0.4));
+  const clip = {
+    id: uid('text'),
+    text: 'Your text',
+    start,
+    end: Math.min(projectDuration(), start + 3),
+    style: {
+      fontFamily: 'Inter', fontSize: Math.round(project.canvas.height * 0.055), bold: true,
+      color: '#ffffff', background: '#00000099', position: 'bottom', animation: 'fade',
+    },
+  };
+  textClips().push(clip);
+  remember(before);
+  selectItem('text', clip.id);
+  renderAll();
+}
+
+function renderTextInspector() {
+  els.inspectorContent.innerHTML = `
+    <button class="import-card text-card" id="add-text">
+      <span class="import-icon" aria-hidden="true">T</span>
+      <span><strong>Add text</strong><small>Creates a timed title at the playhead</small></span>
+    </button>
+    <p class="section-label">Text layers</p>
+    <div class="asset-list" id="text-list"></div>`;
+  $('add-text').addEventListener('click', addTextClip);
+  const list = $('text-list');
+  if (!textClips().length) {
+    list.innerHTML = inspectorEmpty('Titles and captions will appear on their own timeline track.');
+    return;
+  }
+  textClips().forEach((clip) => {
+    const button = document.createElement('button');
+    button.className = 'asset-row';
+    button.innerHTML = `<span class="asset-icon text">T</span><span class="asset-copy"><strong>${escapeHTML(clip.text)}</strong><small>${formatTime(clip.start)} → ${formatTime(clip.end)}</small></span><span aria-hidden="true">›</span>`;
+    button.addEventListener('click', () => { selectItem('text', clip.id); seek(clip.start); });
+    list.appendChild(button);
+  });
+}
+
+function selectedClip() {
+  if (!selected) return null;
+  const collection = selected.type === 'video' ? videoClips() : selected.type === 'audio' ? audioClips() : textClips();
+  return collection.find((clip) => clip.id === selected.id) || null;
+}
+
+function rangeField(label, id, value, min, max, step = 0.1, suffix = 's') {
+  return `<label class="field range-field"><span>${label}<output id="${id}-out">${Number(value).toFixed(step < 1 ? 1 : 0)}${suffix}</output></span><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></label>`;
+}
+
+function bindRange(id, onInput, onCommit) {
+  const input = $(id);
+  let before = null;
+  input.addEventListener('pointerdown', () => { before = snapshot(); });
+  input.addEventListener('focus', () => { if (!before) before = snapshot(); });
+  input.addEventListener('input', () => {
+    $(`${id}-out`).textContent = onInput(Number(input.value));
+    renderTimeline();
+  });
+  input.addEventListener('change', () => {
+    if (before) remember(before);
+    before = null;
+    onCommit?.();
+  });
+}
+
+function renderEditInspector() {
+  const clip = selectedClip();
+  if (!clip) {
+    els.inspectorContent.innerHTML = inspectorEmpty('Select a video, audio, or text block on the timeline to edit it.');
+    return;
+  }
+  if (selected.type === 'video') renderVideoEditor(clip);
+  else if (selected.type === 'audio') renderAudioEditor(clip);
+  else renderTextEditor(clip);
+}
+
+function renderVideoEditor(clip) {
+  const index = videoClips().indexOf(clip);
+  const timeline = videoTimeline()[index];
+  if (clip.kind === 'image') {
+    els.inspectorContent.innerHTML = `
+      <div class="selection-heading"><span class="asset-index">${index + 1}</span><div><strong>${escapeHTML(clip.name)}</strong><small>Photo clip</small></div></div>
+      ${rangeField('Duration', 'image-duration', clip.duration, 0.5, 20, 0.1)}
+      ${editActionButtons(index, true)}`;
+    bindRange('image-duration', (value) => { clip.duration = value; return `${value.toFixed(1)}s`; }, () => syncMedia(true));
+  } else {
+    els.inspectorContent.innerHTML = `
+      <div class="selection-heading"><span class="asset-index">${index + 1}</span><div><strong>${escapeHTML(clip.name)}</strong><small>Video · ${secondsLabel(clipDuration(clip))}</small></div></div>
+      <div class="trim-fields">
+        <label class="field"><span>Starts at</span><input id="trim-start" type="number" min="0" max="${Math.max(0, clip.trimEnd - 0.1)}" step="0.1" value="${clip.trimStart.toFixed(1)}"></label>
+        <label class="field"><span>Ends at</span><input id="trim-end" type="number" min="${clip.trimStart + 0.1}" max="${clip.sourceDuration}" step="0.1" value="${clip.trimEnd.toFixed(1)}"></label>
+      </div>
+      ${rangeField('Original sound', 'clip-volume', clip.volume * 100, 0, 100, 1, '%')}
+      <button id="split-clip" class="wide-action"><span aria-hidden="true">✂</span> Split at playhead</button>
+      ${editActionButtons(index, true)}`;
+    for (const id of ['trim-start', 'trim-end']) {
+      $(id).addEventListener('change', () => {
+        const before = snapshot();
+        clip.trimStart = clamp($('trim-start').value, 0, clip.trimEnd - 0.1);
+        clip.trimEnd = clamp($('trim-end').value, clip.trimStart + 0.1, clip.sourceDuration);
+        remember(before);
+        currentTime = clamp(currentTime, 0, projectDuration());
+        renderAll();
+        syncMedia(true);
+      });
+    }
+    bindRange('clip-volume', (value) => { clip.volume = value / 100; return `${value}%`; }, () => syncMedia());
+    $('split-clip').addEventListener('click', () => splitVideoClip(clip, timeline));
+  }
+  bindMoveDelete(clip, index, 'video');
+}
+
+function editActionButtons(index, movable) {
+  return `<div class="edit-actions">
+    ${movable ? `<button id="move-left" title="Move earlier" ${index === 0 ? 'disabled' : ''}>← <span>Earlier</span></button><button id="move-right" title="Move later" ${index === videoClips().length - 1 ? 'disabled' : ''}><span>Later</span> →</button>` : ''}
+    <button id="delete-clip" class="danger"><span aria-hidden="true">⌫</span> Delete</button>
+  </div>`;
+}
+
+function bindMoveDelete(clip, index, type) {
+  $('move-left')?.addEventListener('click', () => moveVideo(index, -1));
+  $('move-right')?.addEventListener('click', () => moveVideo(index, 1));
+  $('delete-clip').addEventListener('click', () => deleteClip(type, clip.id));
+}
+
+function moveVideo(index, delta) {
+  const next = index + delta;
+  if (next < 0 || next >= videoClips().length) return;
+  const before = snapshot();
+  const [clip] = videoClips().splice(index, 1);
+  videoClips().splice(next, 0, clip);
+  remember(before);
+  renderAll();
+  syncMedia(true);
+}
+
+function splitVideoClip(clip, timelineItem) {
+  const local = currentTime - timelineItem.start;
+  if (local <= 0.1 || local >= timelineItem.duration - 0.1) {
+    return toast('Move the playhead inside this clip before splitting');
+  }
+  const before = snapshot();
+  const index = videoClips().indexOf(clip);
+  const cut = clip.trimStart + local;
+  const second = { ...clip, id: uid('video'), trimStart: cut, name: clip.name };
+  clip.trimEnd = cut;
+  videoClips().splice(index + 1, 0, second);
+  remember(before);
+  selected = { type: 'video', id: second.id };
+  renderAll();
+  syncMedia(true);
+  toast('Clip split at the playhead', 'success');
+}
+
+function renderAudioEditor(clip) {
+  els.inspectorContent.innerHTML = `
+    <div class="selection-heading"><span class="asset-icon audio">♫</span><div><strong>${escapeHTML(clip.name)}</strong><small>Music · ${secondsLabel(clipDuration(clip))}</small></div></div>
+    <label class="field"><span>Timeline start</span><input id="audio-start" type="number" min="0" max="${projectDuration()}" step="0.1" value="${clip.start.toFixed(1)}"></label>
+    <div class="trim-fields">
+      <label class="field"><span>Trim start</span><input id="audio-trim-start" type="number" min="0" max="${Math.max(0, clip.trimEnd - 0.1)}" step="0.1" value="${clip.trimStart.toFixed(1)}"></label>
+      <label class="field"><span>Trim end</span><input id="audio-trim-end" type="number" min="${clip.trimStart + 0.1}" max="${clip.sourceDuration}" step="0.1" value="${clip.trimEnd.toFixed(1)}"></label>
+    </div>
+    ${rangeField('Volume', 'music-volume', clip.volume * 100, 0, 100, 1, '%')}
+    ${rangeField('Fade in', 'fade-in', clip.fadeIn, 0, Math.min(5, clipDuration(clip) / 2), 0.1)}
+    ${rangeField('Fade out', 'fade-out', clip.fadeOut, 0, Math.min(5, clipDuration(clip) / 2), 0.1)}
+    <div class="edit-actions"><button id="delete-clip" class="danger"><span aria-hidden="true">⌫</span> Delete audio</button></div>`;
+  for (const [id, key, min, max] of [
+    ['audio-start', 'start', 0, projectDuration()],
+    ['audio-trim-start', 'trimStart', 0, clip.trimEnd - 0.1],
+    ['audio-trim-end', 'trimEnd', clip.trimStart + 0.1, clip.sourceDuration],
+  ]) {
+    $(id).addEventListener('change', () => {
+      const before = snapshot();
+      clip[key] = clamp($(id).value, min, max);
+      remember(before);
+      renderAll();
+      syncMedia(true);
+    });
+  }
+  bindRange('music-volume', (value) => { clip.volume = value / 100; return `${value}%`; }, () => syncMedia());
+  bindRange('fade-in', (value) => { clip.fadeIn = value; return `${value.toFixed(1)}s`; });
+  bindRange('fade-out', (value) => { clip.fadeOut = value; return `${value.toFixed(1)}s`; });
+  $('delete-clip').addEventListener('click', () => deleteClip('audio', clip.id));
+}
+
+function renderTextEditor(clip) {
+  const style = clip.style;
+  let textBefore = null;
+  els.inspectorContent.innerHTML = `
+    <label class="field"><span>Text</span><textarea id="text-value" rows="3">${escapeHTML(clip.text)}</textarea></label>
+    <div class="trim-fields">
+      <label class="field"><span>Starts at</span><input id="text-start" type="number" min="0" max="${Math.max(0, clip.end - 0.1)}" step="0.1" value="${clip.start.toFixed(1)}"></label>
+      <label class="field"><span>Ends at</span><input id="text-end" type="number" min="${clip.start + 0.1}" max="${projectDuration()}" step="0.1" value="${clip.end.toFixed(1)}"></label>
+    </div>
+    <label class="field"><span>Font</span><select id="text-font"><option>Inter</option><option>Space Grotesk</option><option>Arial</option><option>Georgia</option><option>Impact</option></select></label>
+    ${rangeField('Size', 'text-size', style.fontSize, 24, Math.max(120, project.canvas.height * 0.14), 1, '')}
+    <div class="color-fields">
+      <label class="field"><span>Color</span><input id="text-color" type="color" value="${style.color}"></label>
+      <label class="field"><span>Backdrop</span><select id="text-background"><option value="#00000099">Soft black</option><option value="#ffffffdd">Soft white</option><option value="transparent">None</option></select></label>
+    </div>
+    <label class="field"><span>Position</span><div class="segmented" id="text-position"><button data-value="top">Top</button><button data-value="center">Center</button><button data-value="bottom">Bottom</button></div></label>
+    <label class="field"><span>Animation</span><select id="text-animation"><option value="none">None</option><option value="fade">Fade</option><option value="pop">Pop</option></select></label>
+    <div class="edit-actions"><button id="delete-clip" class="danger"><span aria-hidden="true">⌫</span> Delete text</button></div>`;
+  $('text-font').value = style.fontFamily || 'Inter';
+  $('text-background').value = style.background || 'transparent';
+  $('text-animation').value = style.animation || 'none';
+  document.querySelectorAll('#text-position button').forEach((button) =>
+    button.classList.toggle('active', button.dataset.value === style.position));
+
+  for (const [id, apply] of [
+    ['text-start', (value) => { clip.start = clamp(value, 0, clip.end - 0.1); }],
+    ['text-end', (value) => { clip.end = clamp(value, clip.start + 0.1, projectDuration()); }],
+    ['text-font', (value) => { style.fontFamily = value; }],
+    ['text-color', (value) => { style.color = value; }],
+    ['text-background', (value) => { style.background = value; }],
+    ['text-animation', (value) => { style.animation = value; }],
+  ]) {
+    $(id).addEventListener('change', () => {
+      const before = snapshot();
+      apply($(id).value);
+      remember(before);
+      renderAll();
+    });
+  }
+  $('text-value').addEventListener('focus', () => { textBefore = snapshot(); });
+  $('text-value').addEventListener('input', () => { clip.text = $('text-value').value; renderTimeline(); });
+  $('text-value').addEventListener('change', () => {
+    if (textBefore) remember(textBefore);
+    textBefore = null;
+    renderAll();
+  });
+  bindRange('text-size', (value) => { style.fontSize = value; return String(value); });
+  document.querySelectorAll('#text-position button').forEach((button) => {
+    button.addEventListener('click', () => {
+      const before = snapshot();
+      style.position = button.dataset.value;
+      remember(before);
+      renderAll();
+    });
+  });
+  $('delete-clip').addEventListener('click', () => deleteClip('text', clip.id));
+}
+
+function deleteClip(type, id) {
+  const before = snapshot();
+  const collection = type === 'video' ? videoClips() : type === 'audio' ? audioClips() : textClips();
+  const index = collection.findIndex((clip) => clip.id === id);
+  if (index < 0) return;
+  collection.splice(index, 1);
+  removeUnusedAssets();
+  selected = null;
+  remember(before);
+  currentTime = clamp(currentTime, 0, projectDuration());
+  renderAll();
+  syncMedia(true);
+}
+
+function renderCanvasInspector() {
+  const currentSize = `${project.canvas.width}x${project.canvas.height}`;
+  els.inspectorContent.innerHTML = `
+    <p class="section-label">Aspect ratio</p>
+    <div class="aspect-grid">
+      <button data-size="1080x1920"><span class="ratio-icon portrait"></span><strong>9:16</strong><small>TikTok · Reels</small></button>
+      <button data-size="1920x1080"><span class="ratio-icon landscape"></span><strong>16:9</strong><small>YouTube</small></button>
+      <button data-size="1080x1080"><span class="ratio-icon square"></span><strong>1:1</strong><small>Square</small></button>
+      <button data-size="1080x1350"><span class="ratio-icon four-five"></span><strong>4:5</strong><small>Feed</small></button>
+    </div>
+    <label class="field"><span>Media fit</span><select id="canvas-fit"><option value="cover">Fill frame</option><option value="contain">Fit inside</option></select></label>
+    <label class="field"><span>Frame rate</span><select id="canvas-fps"><option value="24">24 fps</option><option value="30">30 fps</option><option value="60">60 fps</option></select></label>
+    <label class="field"><span>Background</span><input id="canvas-background" type="color" value="${project.canvas.background}"></label>
+    <p class="info-card"><strong>Export quality</strong><span>${project.canvas.width} × ${project.canvas.height} · ${project.canvas.fps} fps</span></p>`;
+  document.querySelectorAll('.aspect-grid button').forEach((button) => {
+    button.classList.toggle('active', button.dataset.size === currentSize);
+    button.addEventListener('click', () => {
+      const before = snapshot();
+      [project.canvas.width, project.canvas.height] = button.dataset.size.split('x').map(Number);
+      remember(before);
+      renderAll();
+    });
+  });
+  $('canvas-fit').value = project.canvas.fit;
+  $('canvas-fps').value = String(project.canvas.fps);
+  for (const [id, key, coerce] of [
+    ['canvas-fit', 'fit', String],
+    ['canvas-fps', 'fps', Number],
+    ['canvas-background', 'background', String],
+  ]) {
+    $(id).addEventListener('change', () => {
+      const before = snapshot();
+      project.canvas[key] = coerce($(id).value);
+      remember(before);
+      renderAll();
+    });
+  }
+}
+
+function renderAll() {
+  els.projectTitle.value = project.title;
+  const ratio = `${project.canvas.width}:${project.canvas.height}`;
+  const labels = { '1080:1920': '9:16', '1920:1080': '16:9', '1080:1080': '1:1', '1080:1350': '4:5' };
+  els.formatLabel.textContent = `${labels[ratio] || ratio} · ${Math.min(project.canvas.width, project.canvas.height)}p`;
+  renderTimeline();
+  renderInspector();
+  updateHistoryButtons();
+}
+
+// ---------- project save/load ----------
+
+els.projectTitle.addEventListener('change', () => {
+  const before = snapshot();
+  project.title = els.projectTitle.value.trim() || 'Untitled video';
+  els.projectTitle.value = project.title;
+  remember(before);
 });
 
 $('save-project').addEventListener('click', () => {
-  downloadBlob(new Blob([serializeProject()], { type: 'application/json' }), baseName() + '.lvm.json');
+  downloadBlob(new Blob([serializeProject()], { type: 'application/json' }), `${safeFilename()}.capy.json`);
+  toast('Editable project saved', 'success');
 });
-
-function applyProjectJSON(text) {
-  const names = restoreProject(text);
-  syncStyleUI();
-  els.lyricsText.value = lyricClips().map((c) => c.text).join('\n');
-  renderLineList();
-  if (names.length) {
-    alert('Project loaded. Re-attach the media files:\n' + names.join('\n'));
-  }
-}
-
 $('load-project-btn').addEventListener('click', () => $('load-project').click());
-$('load-project').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
+$('load-project').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
   if (!file) return;
   try {
-    applyProjectJSON(await file.text());
-  } catch (err) {
-    alert('Could not load project: ' + err.message);
+    pause();
+    for (const runtime of runtimeStore.values()) URL.revokeObjectURL(runtime.url);
+    runtimeStore.clear();
+    const names = restoreProject(await file.text());
+    undoStack.length = 0;
+    redoStack.length = 0;
+    selected = null;
+    currentTime = 0;
+    renderAll();
+    if (names.length) toast(`Project opened — reattach ${names.length} media ${names.length === 1 ? 'file' : 'files'}`);
+  } catch (error) {
+    toast(`Could not open project: ${error.message}`, 'error');
   }
-  e.target.value = '';
+  event.target.value = '';
 });
 
-// ---------- video export ----------
+// ---------- export ----------
+
+async function acquireWakeLock() {
+  try {
+    wakeLock = await navigator.wakeLock?.request('screen');
+  } catch { /* export still works while the screen remains awake */ }
+}
+
+async function releaseWakeLock() {
+  try { await wakeLock?.release(); } catch { /* already released */ }
+  wakeLock = null;
+}
 
 $('export-video').addEventListener('click', async () => {
-  if (!els.player.src) return alert('Load an audio file first.');
-  if (!lyricClips().some((c) => c.start != null)) {
-    if (!confirm('No timed lyrics yet — export video without subtitles?')) return;
+  const duration = projectDuration();
+  if (!duration) return toast('Add at least one video or photo before exporting', 'error');
+  const missing = project.assets.filter((asset) => !runtimeStore.has(asset.id));
+  if (missing.length) {
+    setTool('media');
+    return toast(`Reattach ${missing.length} media ${missing.length === 1 ? 'file' : 'files'} before exporting`, 'error');
   }
+  const previousTime = currentTime;
+  pause();
   exporting = true;
   els.exportOverlay.hidden = false;
   els.exportProgress.value = 0;
   els.exportPct.textContent = '0%';
+  els.exportRemaining.textContent = `About ${secondsLabel(duration)} remaining`;
+  const wakeLockPromise = acquireWakeLock();
   try {
-    const { blob, ext } = await exportVideo({
+    const mediaElements = [...runtimeStore.values()]
+      .filter((runtime) => runtime.kind !== 'image')
+      .map((runtime) => runtime.el);
+    const exportPromise = exportVideo({
       canvas: els.preview,
-      audioEl: els.player,
-      bgVideo: bgEl?.tagName === 'VIDEO' ? bgEl : null,
+      duration,
       fps: project.canvas.fps,
-      onProgress: (p) => {
-        els.exportProgress.value = p;
-        els.exportPct.textContent = Math.round(p * 100) + '%';
+      mediaElements,
+      startPlayback: (from) => play(from),
+      stopPlayback: pause,
+      getCurrentTime: () => currentTime,
+      onProgress: (progress) => {
+        els.exportProgress.value = progress;
+        els.exportPct.textContent = `${Math.round(progress * 100)}%`;
+        els.exportRemaining.textContent = progress >= 1 ? 'Finishing…' : `About ${secondsLabel(duration * (1 - progress))} remaining`;
       },
     });
-    downloadBlob(blob, `${baseName()}.${ext}`);
-    window.__lastExport = { size: blob.size, type: blob.type }; // test hook
-  } catch (err) {
-    if (!err.cancelled) alert('Export failed: ' + err.message);
+    await wakeLockPromise;
+    const result = await exportPromise;
+    downloadBlob(result.blob, `${safeFilename()}.${result.ext}`);
+    toast('Video exported to your device', 'success');
+    window.__lastExport = { size: result.blob.size, type: result.blob.type };
+  } catch (error) {
+    if (!error.cancelled) toast(`Export failed: ${error.message}`, 'error');
   } finally {
     exporting = false;
     els.exportOverlay.hidden = true;
+    await releaseWakeLock();
+    seek(previousTime);
   }
 });
 
 $('export-cancel').addEventListener('click', cancelExport);
 
-// ---------- cloud (optional; active only when firebase-config.js is filled) ----------
+// ---------- boot ----------
 
-if (cloudEnabled) {
-  const cloud = {
-    signIn: $('sign-in'),
-    signOut: $('sign-out'),
-    chip: $('user-chip'),
-    avatar: $('user-avatar'),
-    name: $('user-name'),
-    save: $('cloud-save'),
-    open: $('cloud-open'),
-  };
+renderAll();
+requestAnimationFrame(renderLoop);
 
-  // Deep link from the home screen: editor.html?project=<name> auto-opens
-  // that cloud project once the user is signed in (consumed once).
-  let pendingCloudProject = new URLSearchParams(location.search).get('project');
-
-  initCloud(async (user) => {
-    cloud.signIn.hidden = !!user;
-    cloud.chip.hidden = !user;
-    cloud.save.hidden = !user;
-    cloud.open.hidden = !user;
-    if (user) {
-      cloud.avatar.src = user.photoURL || '';
-      cloud.name.textContent = user.displayName?.split(' ')[0] || user.email;
-    }
-    if (user && pendingCloudProject) {
-      const name = pendingCloudProject;
-      pendingCloudProject = null;
-      history.replaceState(null, '', location.pathname);
-      try {
-        const json = await loadProjectFromCloud(name);
-        if (json) applyProjectJSON(json);
-        else alert(`No cloud project named "${name}".`);
-      } catch (err) {
-        alert('Could not open project: ' + err.message);
-      }
-    }
-  }).catch((err) => console.warn('Cloud unavailable:', err));
-
-  cloud.signIn.addEventListener('click', async () => {
-    try {
-      await signIn();
-    } catch (err) {
-      if (err.code !== 'auth/popup-closed-by-user') alert('Sign-in failed: ' + err.message);
-    }
-  });
-
-  cloud.signOut.addEventListener('click', () => signOutUser());
-
-  cloud.save.addEventListener('click', async () => {
-    const name = prompt('Save to cloud as:', baseName());
-    if (!name || !name.trim()) return;
-    try {
-      await saveProjectToCloud(name.trim(), serializeProject());
-      alert(`Saved "${name.trim()}" to your cloud library.`);
-    } catch (err) {
-      alert('Cloud save failed: ' + err.message);
-    }
-  });
-
-  // ---- project library popover (☁ Open) ----
-
-  const lib = {
-    root: $('cloud-popover'),
-    body: $('cloud-popover-body'),
-    close: $('cloud-popover-close'),
-  };
-
-  function libState(icon, text, onRetry) {
-    lib.body.innerHTML = '';
-    const box = document.createElement('div');
-    box.className = 'cloud-popover__state';
-    const ic = document.createElement('span');
-    ic.className = 'state-icon';
-    ic.setAttribute('aria-hidden', 'true');
-    ic.textContent = icon;
-    const p = document.createElement('p');
-    p.textContent = text;
-    box.append(ic, p);
-    if (onRetry) {
-      const retry = document.createElement('button');
-      retry.textContent = 'Retry';
-      retry.addEventListener('click', onRetry);
-      box.appendChild(retry);
-    }
-    lib.body.appendChild(box);
-  }
-
-  function libShowLoading() {
-    lib.body.innerHTML = '';
-    for (let i = 0; i < 3; i++) {
-      const row = document.createElement('div');
-      row.className = 'skeleton-row';
-      const a = document.createElement('div');
-      a.className = 'skeleton-bar';
-      const b = document.createElement('div');
-      b.className = 'skeleton-bar short';
-      row.append(a, b);
-      lib.body.appendChild(row);
-    }
-  }
-
-  function libEmpty() {
-    libState('☁', 'No cloud projects yet — Save one first');
-  }
-
-  function libRow(item) {
-    const row = document.createElement('div');
-    row.className = 'cloud-project';
-
-    const main = document.createElement('button');
-    main.className = 'cloud-project__main';
-    main.title = `Open "${item.name}"`;
-    const name = document.createElement('span');
-    name.className = 'cloud-project__name';
-    name.textContent = item.name;
-    const meta = document.createElement('span');
-    meta.className = 'cloud-project__meta';
-    meta.textContent = `Updated ${relTime(item.updatedAt)}`;
-    main.append(name, meta);
-    main.addEventListener('click', async () => {
-      try {
-        const json = await loadProjectFromCloud(item.name);
-        if (!json) throw new Error('project not found');
-        closeLibrary();
-        applyProjectJSON(json);
-      } catch (err) {
-        alert('Could not open project: ' + err.message);
-      }
-    });
-
-    const del = document.createElement('button');
-    del.className = 'cloud-project__delete';
-    del.title = 'Delete project';
-    del.setAttribute('aria-label', `Delete "${item.name}"`);
-    del.textContent = '🗑';
-    del.addEventListener('click', () => {
-      const confirmBox = document.createElement('span');
-      confirmBox.className = 'cloud-project__confirm';
-      const yes = document.createElement('button');
-      yes.className = 'confirm-delete';
-      yes.textContent = 'Delete';
-      yes.addEventListener('click', async () => {
-        try {
-          await deleteCloudProject(item.name);
-          row.remove();
-          if (!lib.body.querySelector('.cloud-project')) libEmpty();
-        } catch (err) {
-          alert('Delete failed: ' + err.message);
-        }
-      });
-      const no = document.createElement('button');
-      no.textContent = 'Cancel';
-      no.addEventListener('click', () => confirmBox.replaceWith(del));
-      confirmBox.append(yes, no);
-      del.replaceWith(confirmBox);
-    });
-
-    row.append(main, del);
-    return row;
-  }
-
-  function libShowList(items) {
-    lib.body.innerHTML = '';
-    for (const item of items) lib.body.appendChild(libRow(item));
-  }
-
-  async function openLibrary() {
-    lib.root.hidden = false;
-    libShowLoading();
-    try {
-      const items = await listCloudProjects();
-      if (lib.root.hidden) return; // closed while loading
-      items.length ? libShowList(items) : libEmpty();
-    } catch (err) {
-      console.warn('cloud list failed', err);
-      libState('⚠', "Couldn't load your projects. Check your connection and try again.",
-        openLibrary);
-    }
-  }
-
-  function closeLibrary() {
-    lib.root.hidden = true;
-  }
-
-  cloud.open.addEventListener('click', () => {
-    lib.root.hidden ? openLibrary() : closeLibrary();
-  });
-  lib.close.addEventListener('click', closeLibrary);
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !lib.root.hidden) closeLibrary();
-  });
-  document.addEventListener('click', (e) => {
-    if (lib.root.hidden) return;
-    if (!lib.root.contains(e.target) && !e.target.closest('#cloud-open')) closeLibrary();
-  });
-
-  // Exposed for automated UI testing of the popover states.
-  window.__libDemo = {
-    open: () => (lib.root.hidden = false),
-    close: closeLibrary,
-    loading: libShowLoading,
-    empty: libEmpty,
-    error: () => libState('⚠', "Couldn't load your projects. Check your connection and try again.", openLibrary),
-    list: libShowList,
-  };
-}
-
-// ---------- render loop ----------
-
-function loop() {
-  const t = els.player.currentTime || 0;
-  drawFrame(ctx, { project, bgEl, duration: els.player.duration || 0 }, t);
-  waveform.drawOverlay(t, lyricClips());
-  requestAnimationFrame(loop);
-}
-
-syncStyleUI();
-renderLineList();
-loop();
-
-// Exposed for automated testing; not part of the public surface.
-window.__app = { project, setAudio, setBackground, lyricClips, renderLineList };
+// Test hooks keep browser QA deterministic without becoming public API.
+window.__app = {
+  project,
+  runtimeStore,
+  importVisualFiles,
+  importAudioFiles,
+  seek,
+  play,
+  pause,
+  addTextClip,
+  get currentTime() { return currentTime; },
+};
