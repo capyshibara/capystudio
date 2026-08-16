@@ -9,6 +9,10 @@ text, and export the result without uploading your media to a server.
 ## What the editor can do
 
 - Import multiple videos and photos at once from a phone or computer.
+- Browse six original templates by category or search, preview each recipe, and
+  batch-fill its media slots from the phone picker.
+- Apply template-defined canvas size, clip pacing, reframing, transitions, and
+  editable text while keeping every timeline control available.
 - Join visual clips sequentially on a three-track timeline.
 - Reorder, trim, split, speed up/slow down, and delete video clips.
 - Reframe each clip with direct preview dragging plus zoom and rotation controls.
@@ -32,7 +36,8 @@ text, and export the result without uploading your media to a server.
 
 ## Quick start
 
-1. Open **Video Editor** and choose **Add videos or photos**.
+1. Open **Video Editor** and choose **Add videos or photos**, or start in the
+   **Template Library** and choose **Use template**.
 2. Select several items from the device picker. They appear one after another
    on the Video track.
 3. Tap a clip to trim, split, change speed, reframe it, add its incoming
@@ -73,9 +78,12 @@ The development URL is printed in the terminal (normally
 | File | Role |
 |---|---|
 | `editor.html` | Editor shell, preview, timeline, tool dock, and export UI |
+| `templates.html` | Searchable template gallery and recipe previews |
 | `js/model.js` | Versioned project model and timeline helpers |
 | `js/app.js` | Media loading, playback engine, editing controls, save/load |
 | `js/captions.js` | Local timeline audio decoding and Whisper transcription |
+| `js/templates.js` | Original template recipes, media slots, and metadata |
+| `js/templates-page.js` | Template filtering, preview, and editor handoff |
 | `js/renderer.js` | Canvas compositor used by preview and export |
 | `js/exporter.js` | MediaRecorder and Web Audio export pipeline |
 | `css/style.css` | Desktop and CapCut-inspired mobile UI |
