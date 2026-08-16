@@ -106,8 +106,7 @@ Desktop timing is keyboard-driven. Mobile gets a **Timing mode takeover**:
 ## 5. Remaining out of scope
 
 - Direct manipulation of text inside the preview (drag, rotate, pinch-scale).
-- Transitions, stickers, filters/effects, speed ramps, and background removal.
-- Automatic captions and voice-over recording.
+- Stickers, filters/effects, keyframes, background removal, and speed ramps.
 - Server-side or faster-than-real-time rendering.
 
 ## 6. QA (mobile walkthrough, 375×812)
@@ -115,9 +114,12 @@ Desktop timing is keyboard-driven. Mobile gets a **Timing mode takeover**:
 1. Multi-select videos/photos in the native picker; every item becomes a
    sequential Video-track block.
 2. Preview stays visible while the tool sheet opens and collapses.
-3. Select a video block; trim, split, move earlier/later, and undo.
-4. Add music; set its timeline start, trim, volume, and fades.
-5. Add text; set timing, style, position, and animation; preview updates live.
-6. Change canvas aspect and fit; clip order and total duration remain stable.
-7. Export: wake lock held, progress overlay readable, output downloads.
+3. Select a video block; trim, split, set speed, drag/reframe, move, and undo.
+4. Add an incoming transition to a later video clip and preview the boundary.
+5. Add music; set its timeline start, trim, volume, and fades. Record a short
+   microphone voice-over and verify it lands at the playhead.
+6. Add text; set timing, style, position, and animation. Generate automatic
+   captions and edit one of the resulting text layers.
+7. Change canvas aspect and fit; clip order and total duration remain stable.
+8. Export: wake lock held, progress overlay readable, output downloads.
 8. No horizontal page scroll at 390×844; timeline itself scrolls as intended.

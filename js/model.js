@@ -2,7 +2,7 @@
 // JSON only contains edit decisions and the original filenames.
 
 export const project = {
-  version: 2,
+  version: 3,
   title: 'Untitled video',
   canvas: {
     width: 1080,
@@ -41,7 +41,8 @@ export function textClips() {
 
 export function clipDuration(clip) {
   if (clip.kind === 'image') return Math.max(0.1, Number(clip.duration) || 3);
-  return Math.max(0.1, (Number(clip.trimEnd) || 0) - (Number(clip.trimStart) || 0));
+  const sourceDuration = Math.max(0.1, (Number(clip.trimEnd) || 0) - (Number(clip.trimStart) || 0));
+  return sourceDuration / Math.max(0.25, Number(clip.speed) || 1);
 }
 
 export function videoTimeline() {
@@ -113,6 +114,9 @@ function migrateV1(oldProject) {
       trimStart: 0,
       trimEnd: 6,
       volume: 1,
+      speed: 1,
+      transform: defaultTransform(),
+      transition: defaultTransition(),
     });
   }
 
@@ -157,20 +161,37 @@ function migrateV1(oldProject) {
 
 export function restoreProject(json) {
   const parsed = typeof json === 'string' ? JSON.parse(json) : json;
-  if (!parsed || ![1, 2].includes(parsed.version)) {
+  if (!parsed || ![1, 2, 3].includes(parsed.version)) {
     throw new Error('Unrecognized CapyStudio project file');
   }
   const restored = parsed.version === 1 ? migrateV1(parsed) : parsed;
   const fresh = structuredClone(project);
-  project.version = 2;
+  project.version = 3;
   project.title = restored.title || fresh.title;
   project.canvas = { ...fresh.canvas, ...restored.canvas };
   project.assets = Array.isArray(restored.assets) ? restored.assets : [];
   project.tracks = {
-    video: { clips: restored.tracks?.video?.clips || [] },
+    video: { clips: (restored.tracks?.video?.clips || []).map(normalizeVideoClip) },
     audio: { clips: restored.tracks?.audio?.clips || [] },
     text: { clips: restored.tracks?.text?.clips || [] },
   };
   fileStore.clear();
   return project.assets.map((asset) => asset.name);
+}
+
+export function defaultTransform() {
+  return { scale: 1, rotation: 0, x: 0, y: 0 };
+}
+
+export function defaultTransition() {
+  return { type: 'none', duration: 0.5 };
+}
+
+function normalizeVideoClip(clip) {
+  return {
+    ...clip,
+    speed: Math.max(0.25, Number(clip.speed) || 1),
+    transform: { ...defaultTransform(), ...clip.transform },
+    transition: { ...defaultTransition(), ...clip.transition },
+  };
 }
