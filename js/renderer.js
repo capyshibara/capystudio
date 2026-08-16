@@ -3,7 +3,7 @@
 import { activeTextAt } from './model.js';
 
 export function drawFrame(ctx, state, time) {
-  const { project, visualEl } = state;
+  const { project, visualEl, previousVisualEl, activeVideo, previousVideo, transitionProgress } = state;
   const { width, height, fit, background } = project.canvas;
   const canvas = ctx.canvas;
   if (canvas.width !== width || canvas.height !== height) {
@@ -15,7 +15,25 @@ export function drawFrame(ctx, state, time) {
   ctx.fillRect(0, 0, width, height);
 
   if (visualEl && mediaReady(visualEl)) {
-    drawMedia(ctx, visualEl, width, height, fit);
+    const transition = activeVideo?.clip.transition;
+    if (
+      previousVisualEl && mediaReady(previousVisualEl) && transition?.type !== 'none' &&
+      Number.isFinite(transitionProgress)
+    ) {
+      drawTransition(ctx, {
+        previousVisualEl,
+        visualEl,
+        previousClip: previousVideo?.clip,
+        activeClip: activeVideo.clip,
+        width,
+        height,
+        fit,
+        type: transition.type,
+        progress: transitionProgress,
+      });
+    } else {
+      drawMedia(ctx, visualEl, width, height, fit, activeVideo?.clip.transform);
+    }
   } else {
     drawEmpty(ctx, width, height);
   }
@@ -40,16 +58,62 @@ function drawEmpty(ctx, width, height) {
   ctx.fillText('Add videos or photos to begin', width / 2, height / 2);
 }
 
-function drawMedia(ctx, el, width, height, fit = 'cover') {
+function drawMedia(ctx, el, width, height, fit = 'cover', transform = {}, alpha = 1) {
   const sourceWidth = el.videoWidth || el.naturalWidth;
   const sourceHeight = el.videoHeight || el.naturalHeight;
   if (!sourceWidth || !sourceHeight) return;
-  const scale = fit === 'contain'
+  const baseScale = fit === 'contain'
     ? Math.min(width / sourceWidth, height / sourceHeight)
     : Math.max(width / sourceWidth, height / sourceHeight);
+  const scale = baseScale * Math.max(0.1, Number(transform?.scale) || 1);
   const drawWidth = sourceWidth * scale;
   const drawHeight = sourceHeight * scale;
-  ctx.drawImage(el, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+  const offsetX = width * (Number(transform?.x) || 0) / 100;
+  const offsetY = height * (Number(transform?.y) || 0) / 100;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(width / 2 + offsetX, height / 2 + offsetY);
+  ctx.rotate(((Number(transform?.rotation) || 0) * Math.PI) / 180);
+  ctx.drawImage(el, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+  ctx.restore();
+}
+
+function drawTransition(ctx, options) {
+  const {
+    previousVisualEl, visualEl, previousClip, activeClip,
+    width, height, fit, type,
+  } = options;
+  const progress = Math.max(0, Math.min(1, options.progress));
+  if (type === 'fade') {
+    if (progress < 0.5) {
+      drawMedia(ctx, previousVisualEl, width, height, fit, previousClip?.transform);
+      ctx.fillStyle = `rgba(0,0,0,${progress * 2})`;
+      ctx.fillRect(0, 0, width, height);
+    } else {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
+      drawMedia(ctx, visualEl, width, height, fit, activeClip?.transform, (progress - 0.5) * 2);
+    }
+    return;
+  }
+
+  drawMedia(ctx, previousVisualEl, width, height, fit, previousClip?.transform);
+  if (type === 'slide') {
+    ctx.save();
+    ctx.translate(width * (1 - progress), 0);
+    drawMedia(ctx, visualEl, width, height, fit, activeClip?.transform);
+    ctx.restore();
+  } else if (type === 'zoom') {
+    ctx.save();
+    ctx.translate(width / 2, height / 2);
+    const scale = 0.78 + 0.22 * progress;
+    ctx.scale(scale, scale);
+    ctx.translate(-width / 2, -height / 2);
+    drawMedia(ctx, visualEl, width, height, fit, activeClip?.transform, progress);
+    ctx.restore();
+  } else {
+    drawMedia(ctx, visualEl, width, height, fit, activeClip?.transform, progress);
+  }
 }
 
 function drawTextOverlay(ctx, clip, width, height, time) {

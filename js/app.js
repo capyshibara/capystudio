@@ -13,9 +13,12 @@ import {
   removeUnusedAssets,
   serializeProject,
   restoreProject,
+  defaultTransform,
+  defaultTransition,
 } from './model.js';
 import { drawFrame } from './renderer.js';
 import { exportVideo, cancelExport } from './exporter.js';
+import { generateAutomaticCaptions } from './captions.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -65,6 +68,10 @@ let activeTool = 'media';
 let timelineZoom = Number(els.zoom.value);
 let dragClipId = null;
 let wakeLock = null;
+let voiceRecording = null;
+let captioning = false;
+let captionProgress = { progress: 0, message: '' };
+let transformGesture = null;
 const undoStack = [];
 const redoStack = [];
 
@@ -274,6 +281,9 @@ async function importVisualFiles(files) {
         trimStart: 0,
         trimEnd: duration,
         volume: 1,
+        speed: 1,
+        transform: defaultTransform(),
+        transition: defaultTransition(),
       });
       added++;
     } catch (error) {
@@ -306,6 +316,7 @@ async function importAudioFiles(files) {
         id: uid('audio'),
         assetId: asset.id,
         name: file.name,
+        role: 'music',
         start: cursor,
         sourceDuration: runtime.duration,
         trimStart: 0,
@@ -353,10 +364,68 @@ els.previewWrap.addEventListener('drop', async (event) => {
   await importAudioFiles(files.filter((file) => file.type.startsWith('audio/') || AUDIO_EXT.test(file.name)));
 });
 
+els.preview.addEventListener('pointerdown', (event) => {
+  if (selected?.type !== 'video') return;
+  const clip = selectedClip();
+  if (!clip) return;
+  clip.transform = { ...defaultTransform(), ...clip.transform };
+  transformGesture = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    originX: clip.transform.x,
+    originY: clip.transform.y,
+    before: snapshot(),
+  };
+  els.preview.setPointerCapture(event.pointerId);
+  els.previewWrap.classList.add('positioning');
+});
+
+els.preview.addEventListener('pointermove', (event) => {
+  if (!transformGesture || event.pointerId !== transformGesture.pointerId) return;
+  const clip = selectedClip();
+  if (!clip) return;
+  const rect = els.preview.getBoundingClientRect();
+  clip.transform.x = clamp(transformGesture.originX + ((event.clientX - transformGesture.startX) / rect.width) * 100, -100, 100);
+  clip.transform.y = clamp(transformGesture.originY + ((event.clientY - transformGesture.startY) / rect.height) * 100, -100, 100);
+  if ($('clip-x')) {
+    $('clip-x').value = clip.transform.x;
+    $('clip-x-out').textContent = `${Math.round(clip.transform.x)}%`;
+  }
+  if ($('clip-y')) {
+    $('clip-y').value = clip.transform.y;
+    $('clip-y-out').textContent = `${Math.round(clip.transform.y)}%`;
+  }
+});
+
+function endTransformGesture(event) {
+  if (!transformGesture || event.pointerId !== transformGesture.pointerId) return;
+  remember(transformGesture.before);
+  transformGesture = null;
+  els.previewWrap.classList.remove('positioning');
+}
+els.preview.addEventListener('pointerup', endTransformGesture);
+els.preview.addEventListener('pointercancel', endTransformGesture);
+
 // ---------- playback engine ----------
 
 function sourceTimeFor(info, time) {
-  return info.clip.kind === 'image' ? 0 : info.clip.trimStart + (time - info.start);
+  const speed = Math.max(0.25, Number(info.clip.speed) || 1);
+  return info.clip.kind === 'image' ? 0 : info.clip.trimStart + (time - info.start) * speed;
+}
+
+function transitionStateAt(time) {
+  const timeline = videoTimeline();
+  const active = activeVideoAt(time);
+  if (!active) return { active: null, previous: null, progress: null };
+  const index = timeline.findIndex((item) => item.clip.id === active.clip.id);
+  const transition = active.clip.transition || defaultTransition();
+  const duration = Math.min(Number(transition.duration) || 0, active.duration * 0.5);
+  const local = time - active.start;
+  const previous = index > 0 && transition.type !== 'none' && duration > 0 && local < duration
+    ? timeline[index - 1]
+    : null;
+  return { active, previous, progress: previous ? clamp(local / duration, 0, 1) : null };
 }
 
 function fadeVolume(clip, time) {
@@ -370,7 +439,8 @@ function fadeVolume(clip, time) {
 
 async function syncMedia(forceSeek = false) {
   const promises = [];
-  const active = activeVideoAt(currentTime);
+  const transitionState = transitionStateAt(currentTime);
+  const active = transitionState.active;
   const changed = active?.clip.id !== activeVideoClipId;
   if (changed) {
     for (const runtime of runtimeStore.values()) {
@@ -383,12 +453,30 @@ async function syncMedia(forceSeek = false) {
     const runtime = runtimeStore.get(active.clip.assetId);
     if (runtime?.kind === 'video') {
       const desired = sourceTimeFor(active, currentTime);
-      runtime.el.volume = clamp(active.clip.volume, 0, 1);
+      runtime.el.playbackRate = Math.max(0.25, Number(active.clip.speed) || 1);
+      runtime.el.preservesPitch = true;
+      const transitionGain = transitionState.previous ? transitionState.progress : 1;
+      runtime.el.volume = clamp(active.clip.volume * transitionGain, 0, 1);
       if (changed || forceSeek || Math.abs(runtime.el.currentTime - desired) > 0.28) {
         try { runtime.el.currentTime = desired; } catch { /* metadata may still be settling */ }
       }
       if (playing && runtime.el.paused) promises.push(runtime.el.play().catch(() => {}));
       if (!playing && !runtime.el.paused) runtime.el.pause();
+    }
+  }
+
+  if (transitionState.previous && transitionState.previous.clip.assetId !== active?.clip.assetId) {
+    const previousRuntime = runtimeStore.get(transitionState.previous.clip.assetId);
+    if (previousRuntime?.kind === 'video') {
+      previousRuntime.el.pause();
+      previousRuntime.el.playbackRate = Math.max(0.25, Number(transitionState.previous.clip.speed) || 1);
+      const finalFrame = Math.max(
+        transitionState.previous.clip.trimStart,
+        transitionState.previous.clip.trimEnd - 0.04,
+      );
+      if (forceSeek || Math.abs(previousRuntime.el.currentTime - finalFrame) > 0.08) {
+        try { previousRuntime.el.currentTime = finalFrame; } catch { /* non-fatal */ }
+      }
     }
   }
 
@@ -463,9 +551,18 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-function activeVisualElement() {
-  const info = activeVideoAt(currentTime);
-  return info ? runtimeStore.get(info.clip.assetId)?.el || null : null;
+function activeVisualState() {
+  const state = transitionStateAt(currentTime);
+  const previousRuntime = state.previous && state.previous.clip.assetId !== state.active?.clip.assetId
+    ? runtimeStore.get(state.previous.clip.assetId)
+    : null;
+  return {
+    activeVideo: state.active,
+    previousVideo: previousRuntime ? state.previous : null,
+    visualEl: state.active ? runtimeStore.get(state.active.clip.assetId)?.el || null : null,
+    previousVisualEl: previousRuntime?.el || null,
+    transitionProgress: previousRuntime ? state.progress : null,
+  };
 }
 
 function updateTransport() {
@@ -483,12 +580,16 @@ function renderLoop(now) {
     if (currentTime >= projectDuration()) {
       currentTime = projectDuration();
       pause();
+      if (voiceRecording && !voiceRecording.stopping) stopVoiceover();
     } else {
       syncMedia(false);
     }
   }
-  drawFrame(ctx, { project, visualEl: activeVisualElement() }, currentTime);
+  drawFrame(ctx, { project, ...activeVisualState() }, currentTime);
   updateTransport();
+  if (voiceRecording && $('voiceover-time')) {
+    $('voiceover-time').textContent = `Recording ${formatTime(Math.max(0, currentTime - voiceRecording.start))}`;
+  }
   requestAnimationFrame(renderLoop);
 }
 
@@ -509,6 +610,10 @@ function timelineBlock({ type, clip, start, duration, label, sublabel, thumbnail
   block.style.width = `${Math.max(type === 'video' ? 52 : 34, duration * timelineZoom)}px`;
   block.dataset.id = clip.id;
   block.title = `${label} · ${secondsLabel(duration)}`;
+  if (type === 'video' && clip.transition?.type !== 'none') {
+    block.classList.add('has-transition');
+    block.dataset.transition = clip.transition.type;
+  }
   if (thumbnail) block.style.setProperty('--thumb', `url("${thumbnail}")`);
   block.innerHTML = `<span class="clip-grip" aria-hidden="true"></span><span class="clip-copy"><strong>${escapeHTML(label)}</strong><small>${escapeHTML(sublabel)}</small></span>`;
   block.addEventListener('click', (event) => {
@@ -576,7 +681,7 @@ function renderTimeline() {
       start: item.start,
       duration: item.duration,
       label: item.clip.name,
-      sublabel: `${timeline.indexOf(item) + 1} · ${secondsLabel(item.duration)}`,
+      sublabel: `${timeline.indexOf(item) + 1} · ${secondsLabel(item.duration)}${(item.clip.speed || 1) !== 1 ? ` · ${item.clip.speed}×` : ''}`,
       thumbnail: runtime?.thumbnail,
     }));
   }
@@ -671,26 +776,121 @@ function renderMediaInspector() {
 }
 
 function renderAudioInspector() {
+  const recording = !!voiceRecording;
   els.inspectorContent.innerHTML = `
-    <button class="import-card audio-card" id="add-audio">
-      <span class="import-icon" aria-hidden="true">♫</span>
-      <span><strong>Add music</strong><small>Choose one or more songs from this device</small></span>
-    </button>
+    <div class="quick-action-grid">
+      <button class="import-card audio-card compact-card" id="add-audio" ${recording ? 'disabled' : ''}>
+        <span class="import-icon" aria-hidden="true">♫</span>
+        <span><strong>Add music</strong><small>From device</small></span>
+      </button>
+      <button class="import-card voice-card compact-card ${recording ? 'recording' : ''}" id="record-voice">
+        <span class="import-icon" aria-hidden="true">${recording ? '■' : '●'}</span>
+        <span><strong>${recording ? 'Stop voice-over' : 'Voice-over'}</strong><small id="voiceover-time">${recording ? 'Recording…' : 'Use microphone'}</small></span>
+      </button>
+    </div>
+    <p class="privacy-note"><span aria-hidden="true">●</span> Microphone audio stays on this device.</p>
     <p class="section-label">Audio track</p>
     <div class="asset-list" id="audio-list"></div>`;
   $('add-audio').addEventListener('click', () => els.audioInput.click());
+  $('record-voice').addEventListener('click', () => recording ? stopVoiceover() : startVoiceover());
   const list = $('audio-list');
   if (!audioClips().length) {
-    list.innerHTML = inspectorEmpty('Music is placed at the playhead, then arranged one after another.');
+    list.innerHTML = inspectorEmpty('Add music or record narration. New audio begins at the playhead.');
     return;
   }
   audioClips().forEach((clip) => {
     const button = document.createElement('button');
     button.className = 'asset-row';
-    button.innerHTML = `<span class="asset-icon audio">♫</span><span class="asset-copy"><strong>${escapeHTML(clip.name)}</strong><small>${formatTime(clip.start)} · ${Math.round(clip.volume * 100)}%</small></span><span aria-hidden="true">›</span>`;
+    button.innerHTML = `<span class="asset-icon audio">${clip.role === 'voiceover' ? '●' : '♫'}</span><span class="asset-copy"><strong>${escapeHTML(clip.name)}</strong><small>${clip.role === 'voiceover' ? 'Voice-over' : 'Music'} · ${formatTime(clip.start)} · ${Math.round(clip.volume * 100)}%</small></span><span aria-hidden="true">›</span>`;
     button.addEventListener('click', () => { selectItem('audio', clip.id); seek(clip.start); });
     list.appendChild(button);
   });
+}
+
+async function startVoiceover() {
+  if (!projectDuration()) return toast('Add a video or photo before recording voice-over');
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    return toast('Microphone recording is not supported in this browser', 'error');
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    const mimeType = [
+      'audio/mp4;codecs=mp4a.40.2',
+      'audio/webm;codecs=opus',
+      'audio/ogg;codecs=opus',
+      'audio/webm',
+    ].find((type) => MediaRecorder.isTypeSupported(type)) || '';
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    const start = currentTime >= projectDuration() - 0.1 ? 0 : currentTime;
+    voiceRecording = {
+      recorder,
+      stream,
+      chunks: [],
+      start,
+      before: snapshot(),
+      stopping: false,
+    };
+    recorder.addEventListener('dataavailable', (event) => {
+      if (event.data.size) voiceRecording?.chunks.push(event.data);
+    });
+    recorder.start(250);
+    await play(start);
+    activeTool = 'audio';
+    renderInspector();
+    toast('Voice-over recording started');
+  } catch (error) {
+    voiceRecording?.stream?.getTracks().forEach((track) => track.stop());
+    voiceRecording = null;
+    const message = error.name === 'NotAllowedError'
+      ? 'Microphone permission was not granted'
+      : `Could not start voice-over: ${error.message}`;
+    toast(message, 'error');
+  }
+}
+
+async function stopVoiceover() {
+  const recording = voiceRecording;
+  if (!recording || recording.stopping) return;
+  recording.stopping = true;
+  pause();
+  const stopped = new Promise((resolve) => recording.recorder.addEventListener('stop', resolve, { once: true }));
+  recording.recorder.stop();
+  await stopped;
+  recording.stream.getTracks().forEach((track) => track.stop());
+  const blob = new Blob(recording.chunks, { type: recording.recorder.mimeType || 'audio/webm' });
+  const extension = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm';
+  const file = new File([blob], `Voice-over ${new Date().toLocaleTimeString().replaceAll(':', '-')}.${extension}`, { type: blob.type });
+  try {
+    const { asset } = addAsset('audio', file);
+    const runtime = await createRuntime(asset, file);
+    const recordedDuration = Math.min(runtime.duration || currentTime - recording.start, projectDuration() - recording.start);
+    const clip = {
+      id: uid('audio'),
+      assetId: asset.id,
+      name: file.name,
+      role: 'voiceover',
+      start: recording.start,
+      sourceDuration: runtime.duration || recordedDuration,
+      trimStart: 0,
+      trimEnd: Math.max(0.1, recordedDuration),
+      volume: 1,
+      fadeIn: 0,
+      fadeOut: 0.15,
+    };
+    audioClips().push(clip);
+    remember(recording.before);
+    voiceRecording = null;
+    selected = { type: 'audio', id: clip.id };
+    activeTool = 'edit';
+    renderAll();
+    toast('Voice-over added to the timeline', 'success');
+  } catch (error) {
+    voiceRecording = null;
+    renderInspector();
+    toast(`Could not add voice-over: ${error.message}`, 'error');
+  }
 }
 
 function addTextClip() {
@@ -715,13 +915,24 @@ function addTextClip() {
 
 function renderTextInspector() {
   els.inspectorContent.innerHTML = `
-    <button class="import-card text-card" id="add-text">
-      <span class="import-icon" aria-hidden="true">T</span>
-      <span><strong>Add text</strong><small>Creates a timed title at the playhead</small></span>
-    </button>
+    <div class="quick-action-grid">
+      <button class="import-card text-card compact-card" id="add-text" ${captioning ? 'disabled' : ''}>
+        <span class="import-icon" aria-hidden="true">T</span>
+        <span><strong>Add text</strong><small>At playhead</small></span>
+      </button>
+      <button class="import-card caption-card compact-card" id="auto-captions" ${captioning ? 'disabled' : ''}>
+        <span class="import-icon" aria-hidden="true">✦</span>
+        <span><strong>${captioning ? 'Captioning…' : 'Auto captions'}</strong><small>Private Whisper AI</small></span>
+      </button>
+    </div>
+    <label class="field caption-language"><span>Spoken language</span><select id="caption-language" ${captioning ? 'disabled' : ''}>
+      <option value="auto">Auto detect</option><option value="english">English</option><option value="vietnamese">Vietnamese</option><option value="chinese">Chinese</option><option value="japanese">Japanese</option><option value="korean">Korean</option><option value="thai">Thai</option><option value="indonesian">Indonesian</option><option value="spanish">Spanish</option><option value="french">French</option>
+    </select></label>
+    ${captioning ? `<div class="caption-progress"><div><strong>${escapeHTML(captionProgress.message)}</strong><span>${Math.round(captionProgress.progress * 100)}%</span></div><progress id="caption-progress" max="1" value="${captionProgress.progress}"></progress></div>` : '<p class="privacy-note"><span aria-hidden="true">●</span> The speech model downloads once; audio stays in this browser.</p>'}
     <p class="section-label">Text layers</p>
     <div class="asset-list" id="text-list"></div>`;
   $('add-text').addEventListener('click', addTextClip);
+  $('auto-captions').addEventListener('click', () => runAutoCaptions($('caption-language').value));
   const list = $('text-list');
   if (!textClips().length) {
     list.innerHTML = inspectorEmpty('Titles and captions will appear on their own timeline track.');
@@ -734,6 +945,60 @@ function renderTextInspector() {
     button.addEventListener('click', () => { selectItem('text', clip.id); seek(clip.start); });
     list.appendChild(button);
   });
+}
+
+async function runAutoCaptions(language) {
+  if (!projectDuration()) return toast('Add a video before generating captions');
+  const previousCaptions = textClips().filter((clip) => clip.kind === 'caption');
+  if (previousCaptions.length && !confirm('Replace the existing automatic captions?')) return;
+  const before = snapshot();
+  captioning = true;
+  captionProgress = { progress: 0, message: 'Preparing timeline audio…' };
+  activeTool = 'text';
+  renderInspector();
+  try {
+    const chunks = await generateAutomaticCaptions({
+      project,
+      fileStore,
+      language,
+      onProgress: (state) => {
+        captionProgress = state;
+        const box = els.inspectorContent.querySelector('.caption-progress strong');
+        const pct = els.inspectorContent.querySelector('.caption-progress span');
+        const bar = $('caption-progress');
+        if (box) box.textContent = state.message;
+        if (pct) pct.textContent = `${Math.round(state.progress * 100)}%`;
+        if (bar) bar.value = state.progress;
+      },
+    });
+    project.tracks.text.clips = textClips().filter((clip) => clip.kind !== 'caption');
+    for (const chunk of chunks) {
+      textClips().push({
+        id: uid('text'),
+        kind: 'caption',
+        text: chunk.text,
+        start: chunk.start,
+        end: chunk.end,
+        style: {
+          fontFamily: 'Inter',
+          fontSize: Math.round(project.canvas.height * 0.045),
+          bold: true,
+          color: '#ffffff',
+          background: '#000000b8',
+          position: 'bottom',
+          animation: 'fade',
+        },
+      });
+    }
+    remember(before);
+    toast(`Created ${chunks.length} automatic captions`, 'success');
+  } catch (error) {
+    toast(`Automatic captions failed: ${error.message}`, 'error');
+  } finally {
+    captioning = false;
+    captionProgress = { progress: 0, message: '' };
+    renderAll();
+  }
 }
 
 function selectedClip() {
@@ -776,22 +1041,41 @@ function renderEditInspector() {
 function renderVideoEditor(clip) {
   const index = videoClips().indexOf(clip);
   const timeline = videoTimeline()[index];
-  if (clip.kind === 'image') {
-    els.inspectorContent.innerHTML = `
-      <div class="selection-heading"><span class="asset-index">${index + 1}</span><div><strong>${escapeHTML(clip.name)}</strong><small>Photo clip</small></div></div>
-      ${rangeField('Duration', 'image-duration', clip.duration, 0.5, 20, 0.1)}
-      ${editActionButtons(index, true)}`;
-    bindRange('image-duration', (value) => { clip.duration = value; return `${value.toFixed(1)}s`; }, () => syncMedia(true));
-  } else {
-    els.inspectorContent.innerHTML = `
-      <div class="selection-heading"><span class="asset-index">${index + 1}</span><div><strong>${escapeHTML(clip.name)}</strong><small>Video · ${secondsLabel(clipDuration(clip))}</small></div></div>
-      <div class="trim-fields">
+  clip.transform = { ...defaultTransform(), ...clip.transform };
+  clip.transition = { ...defaultTransition(), ...clip.transition };
+  const transform = clip.transform;
+  const mediaFields = clip.kind === 'image'
+    ? rangeField('Duration', 'image-duration', clip.duration, 0.5, 20, 0.1)
+    : `<div class="trim-fields">
         <label class="field"><span>Starts at</span><input id="trim-start" type="number" min="0" max="${Math.max(0, clip.trimEnd - 0.1)}" step="0.1" value="${clip.trimStart.toFixed(1)}"></label>
         <label class="field"><span>Ends at</span><input id="trim-end" type="number" min="${clip.trimStart + 0.1}" max="${clip.sourceDuration}" step="0.1" value="${clip.trimEnd.toFixed(1)}"></label>
       </div>
+      ${rangeField('Speed', 'clip-speed', clip.speed || 1, 0.25, 4, 0.25, '×')}
       ${rangeField('Original sound', 'clip-volume', clip.volume * 100, 0, 100, 1, '%')}
-      <button id="split-clip" class="wide-action"><span aria-hidden="true">✂</span> Split at playhead</button>
-      ${editActionButtons(index, true)}`;
+      <button id="split-clip" class="wide-action"><span aria-hidden="true">✂</span> Split at playhead</button>`;
+
+  els.inspectorContent.innerHTML = `
+    <div class="selection-heading"><span class="asset-index">${index + 1}</span><div><strong>${escapeHTML(clip.name)}</strong><small>${clip.kind === 'image' ? 'Photo' : 'Video'} · ${secondsLabel(clipDuration(clip))}</small></div></div>
+    ${mediaFields}
+    <p class="section-label">Transform</p>
+    <p class="gesture-hint"><span aria-hidden="true">✥</span> Drag directly on the preview to position this clip.</p>
+    ${rangeField('Zoom', 'clip-scale', transform.scale * 100, 50, 300, 1, '%')}
+    ${rangeField('Rotate', 'clip-rotation', transform.rotation, -180, 180, 1, '°')}
+    <div class="trim-fields">
+      ${rangeField('Horizontal', 'clip-x', transform.x, -100, 100, 1, '%')}
+      ${rangeField('Vertical', 'clip-y', transform.y, -100, 100, 1, '%')}
+    </div>
+    <button id="reset-transform" class="wide-action quiet-border">Reset transform</button>
+    <p class="section-label">Transition into clip</p>
+    <label class="field"><span>Style</span><select id="clip-transition" ${index === 0 ? 'disabled' : ''}>
+      <option value="none">None</option><option value="crossfade">Crossfade</option><option value="fade">Fade through black</option><option value="slide">Slide</option><option value="zoom">Zoom</option>
+    </select></label>
+    ${index === 0 ? '<p class="field-note">Transitions begin on the second clip.</p>' : rangeField('Duration', 'transition-duration', clip.transition.duration, 0.2, 1.5, 0.1)}
+    ${editActionButtons(index, true)}`;
+
+  if (clip.kind === 'image') {
+    bindRange('image-duration', (value) => { clip.duration = value; return `${value.toFixed(1)}s`; }, () => syncMedia(true));
+  } else {
     for (const id of ['trim-start', 'trim-end']) {
       $(id).addEventListener('change', () => {
         const before = snapshot();
@@ -803,8 +1087,39 @@ function renderVideoEditor(clip) {
         syncMedia(true);
       });
     }
+    bindRange('clip-speed', (value) => {
+      clip.speed = value;
+      currentTime = clamp(currentTime, 0, projectDuration());
+      syncMedia(true);
+      return `${value.toFixed(2).replace(/0$/, '')}×`;
+    }, () => renderAll());
     bindRange('clip-volume', (value) => { clip.volume = value / 100; return `${value}%`; }, () => syncMedia());
     $('split-clip').addEventListener('click', () => splitVideoClip(clip, timeline));
+  }
+
+  bindRange('clip-scale', (value) => { transform.scale = value / 100; return `${value}%`; });
+  bindRange('clip-rotation', (value) => { transform.rotation = value; return `${value}°`; });
+  bindRange('clip-x', (value) => { transform.x = value; return `${value}%`; });
+  bindRange('clip-y', (value) => { transform.y = value; return `${value}%`; });
+  $('reset-transform').addEventListener('click', () => {
+    const before = snapshot();
+    clip.transform = defaultTransform();
+    remember(before);
+    renderAll();
+  });
+  $('clip-transition').value = index === 0 ? 'none' : clip.transition.type;
+  $('clip-transition').addEventListener('change', () => {
+    const before = snapshot();
+    clip.transition.type = $('clip-transition').value;
+    remember(before);
+    renderAll();
+    syncMedia(true);
+  });
+  if (index > 0) {
+    bindRange('transition-duration', (value) => {
+      clip.transition.duration = value;
+      return `${value.toFixed(1)}s`;
+    }, () => syncMedia(true));
   }
   bindMoveDelete(clip, index, 'video');
 }
@@ -840,8 +1155,15 @@ function splitVideoClip(clip, timelineItem) {
   }
   const before = snapshot();
   const index = videoClips().indexOf(clip);
-  const cut = clip.trimStart + local;
-  const second = { ...clip, id: uid('video'), trimStart: cut, name: clip.name };
+  const cut = clip.trimStart + local * Math.max(0.25, Number(clip.speed) || 1);
+  const second = {
+    ...clip,
+    id: uid('video'),
+    trimStart: cut,
+    name: clip.name,
+    transform: { ...clip.transform },
+    transition: defaultTransition(),
+  };
   clip.trimEnd = cut;
   videoClips().splice(index + 1, 0, second);
   remember(before);
@@ -852,8 +1174,9 @@ function splitVideoClip(clip, timelineItem) {
 }
 
 function renderAudioEditor(clip) {
+  const isVoiceover = clip.role === 'voiceover';
   els.inspectorContent.innerHTML = `
-    <div class="selection-heading"><span class="asset-icon audio">♫</span><div><strong>${escapeHTML(clip.name)}</strong><small>Music · ${secondsLabel(clipDuration(clip))}</small></div></div>
+    <div class="selection-heading"><span class="asset-icon audio">${isVoiceover ? '●' : '♫'}</span><div><strong>${escapeHTML(clip.name)}</strong><small>${isVoiceover ? 'Voice-over' : 'Music'} · ${secondsLabel(clipDuration(clip))}</small></div></div>
     <label class="field"><span>Timeline start</span><input id="audio-start" type="number" min="0" max="${projectDuration()}" step="0.1" value="${clip.start.toFixed(1)}"></label>
     <div class="trim-fields">
       <label class="field"><span>Trim start</span><input id="audio-trim-start" type="number" min="0" max="${Math.max(0, clip.trimEnd - 0.1)}" step="0.1" value="${clip.trimStart.toFixed(1)}"></label>
@@ -1103,6 +1426,10 @@ $('export-cancel').addEventListener('click', cancelExport);
 
 // ---------- boot ----------
 
+if (location.hash === '#captions') {
+  activeTool = 'text';
+  els.inspector.classList.add('open');
+}
 renderAll();
 requestAnimationFrame(renderLoop);
 

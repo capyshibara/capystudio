@@ -10,12 +10,17 @@ text, and export the result without uploading your media to a server.
 
 - Import multiple videos and photos at once from a phone or computer.
 - Join visual clips sequentially on a three-track timeline.
-- Reorder, trim, split, resize, and delete video clips.
+- Reorder, trim, split, speed up/slow down, and delete video clips.
+- Reframe each clip with direct preview dragging plus zoom and rotation controls.
+- Add crossfade, fade-through-black, slide, or zoom transitions between clips.
 - Control the original sound of each video clip.
 - Add one or more songs from the device, position and trim them, and adjust
   volume plus fade-in/fade-out.
+- Record voice-over from the device microphone directly onto the timeline.
 - Add multiple timed text layers with font, size, color, backdrop, position,
   and fade/pop animation controls.
+- Generate editable automatic captions in the browser with a private Whisper
+  speech model. The first use downloads the model and caches it locally.
 - Preview the complete edit with synchronized video, original audio, music,
   and text.
 - Choose 9:16, 16:9, 1:1, or 4:5 output and 24/30/60 fps.
@@ -30,10 +35,10 @@ text, and export the result without uploading your media to a server.
 1. Open **Video Editor** and choose **Add videos or photos**.
 2. Select several items from the device picker. They appear one after another
    on the Video track.
-3. Tap a clip to trim, split, change its original volume, move it earlier or
-   later, or delete it.
-4. Open **Audio** to add songs. Open **Text** to create timed titles or
-   captions at the playhead.
+3. Tap a clip to trim, split, change speed, reframe it, add its incoming
+   transition, move it, or change its original volume.
+4. Open **Audio** to add songs or record voice-over. Open **Text** to create
+   timed titles at the playhead or generate editable automatic captions.
 5. Use **Canvas** for the target social format, preview the result, then choose
    **Export**.
 
@@ -48,6 +53,11 @@ the editor. Export uses `MediaRecorder` on the composed canvas and mixed Web
 Audio output. It therefore runs in real time: a four-minute timeline takes
 about four minutes to export, and the tab should remain visible. CapyStudio
 requests a screen wake lock on supported mobile browsers during export.
+
+Automatic captions use Transformers.js and a compact Whisper model. The model
+files are downloaded from Hugging Face on first use and cached by the browser;
+the timeline audio is decoded and transcribed locally. Voice-over requires the
+browser's microphone permission.
 
 ## Development
 
@@ -65,6 +75,7 @@ The development URL is printed in the terminal (normally
 | `editor.html` | Editor shell, preview, timeline, tool dock, and export UI |
 | `js/model.js` | Versioned project model and timeline helpers |
 | `js/app.js` | Media loading, playback engine, editing controls, save/load |
+| `js/captions.js` | Local timeline audio decoding and Whisper transcription |
 | `js/renderer.js` | Canvas compositor used by preview and export |
 | `js/exporter.js` | MediaRecorder and Web Audio export pipeline |
 | `css/style.css` | Desktop and CapCut-inspired mobile UI |
@@ -73,8 +84,10 @@ The development URL is printed in the terminal (normally
 
 - Export is real-time and the available MP4/WebM format depends on the browser.
 - Media bytes are not embedded in saved project JSON.
-- Transitions, stickers/effects, speed ramps, automatic captions, and
-  voice-over recording are not part of this release yet.
+- Stickers, filters/effects, keyframes, background removal, and speed ramps are
+  not part of this release yet. Constant per-clip speed is supported.
+- Automatic caption quality and speed depend on the browser, device memory,
+  spoken audio, and the compact local model.
 - Very large or long projects remain constrained by the phone/browser's memory.
 
 ## License
