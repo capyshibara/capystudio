@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#090a0e">
+<title>Template Library · CapyStudio</title>
+<meta name="description" content="Start a private CapyStudio edit from an original, ready-made video template.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="./css/style.css">
+</head>
+<body class="templates-page">
+<header class="library-header">
+  <a class="back-link" href="./" aria-label="Back to CapyStudio home">‹</a>
+  <a class="wordmark" href="./">CapyStudio</a>
+  <a class="library-new-link" href="./editor.html">Blank project <span aria-hidden="true">→</span></a>
+</header>
+
+<main class="template-main">
+  <section class="template-hero">
+    <span class="template-eyebrow">Create faster</span>
+    <h1>Start with a story,<br>make it yours.</h1>
+    <p>Pick an original CapyStudio recipe, choose your photos or videos, and get an editable timeline with pacing, transitions, framing, and text already organized.</p>
+  </section>
+
+  <section class="template-browser" aria-labelledby="library-title">
+    <div class="template-browser-top">
+      <div>
+        <h2 id="library-title">Template library</h2>
+        <span id="template-count">6 templates</span>
+      </div>
+      <label class="template-search">
+        <span aria-hidden="true">⌕</span>
+        <input id="template-search" type="search" placeholder="Search styles, uses, moods…" aria-label="Search templates">
+      </label>
+    </div>
+    <div class="template-categories" id="template-categories" aria-label="Template categories"></div>
+    <div class="template-grid" id="template-grid"></div>
+    <div class="template-empty" id="template-empty" hidden>
+      <span aria-hidden="true">◇</span>
+      <strong>No templates match that search</strong>
+      <p>Try a mood such as “soft”, “travel”, “product”, or “fast”.</p>
+    </div>
+  </section>
+
+  <section class="template-privacy">
+    <span aria-hidden="true">●</span>
+    <div><strong>Your media remains private</strong><p>Templates are edit recipes. Your selected files stay on this device and are never bundled with the template.</p></div>
+  </section>
+</main>
+
+<dialog class="template-dialog" id="template-dialog">
+  <button class="template-dialog-close" id="template-dialog-close" aria-label="Close template preview">×</button>
+  <div id="template-dialog-content"></div>
+</dialog>
+
+<script type="module" src="./js/templates-page.js"></script>
+</body>
+</html>

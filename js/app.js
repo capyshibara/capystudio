@@ -19,6 +19,7 @@ import {
 import { drawFrame } from './renderer.js';
 import { exportVideo, cancelExport } from './exporter.js';
 import { generateAutomaticCaptions } from './captions.js';
+import { getTemplate } from './templates.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -72,6 +73,10 @@ let voiceRecording = null;
 let captioning = false;
 let captionProgress = { progress: 0, message: '' };
 let transformGesture = null;
+const requestedTemplate = getTemplate(new URLSearchParams(location.search).get('template'));
+let templateSession = requestedTemplate
+  ? { template: requestedTemplate, nextSlot: 0, textAdded: false }
+  : null;
 const undoStack = [];
 const redoStack = [];
 
@@ -254,12 +259,82 @@ function visualKind(file) {
   return 'video';
 }
 
+function addTemplateText(template) {
+  templateSession.textAdded = textClips().some((clip) => clip.templateId === template.id);
+  if (templateSession.textAdded) return;
+  for (const layer of template.text) {
+    textClips().push({
+      id: uid('text'),
+      kind: 'template-text',
+      templateId: template.id,
+      text: layer.text,
+      start: layer.start,
+      end: layer.end,
+      style: {
+        fontFamily: layer.fontFamily || 'Space Grotesk',
+        fontSize: Math.round(project.canvas.height * layer.size),
+        bold: true,
+        color: layer.color || '#ffffff',
+        background: layer.background ?? '#00000099',
+        position: layer.position || 'bottom',
+        animation: layer.animation || 'fade',
+      },
+    });
+  }
+  templateSession.textAdded = true;
+}
+
+function applyTemplateToClips(clips) {
+  if (!templateSession || !clips.length) return null;
+  const { template } = templateSession;
+  templateSession.nextSlot = Math.min(
+    template.slots.length,
+    videoClips().filter((clip) => clip.templateId === template.id).length,
+  );
+  if (templateSession.nextSlot === 0) {
+    project.title = `${template.name} edit`;
+    project.canvas = { ...project.canvas, ...template.canvas };
+    addTemplateText(template);
+  }
+
+  let applied = 0;
+  for (const clip of clips) {
+    const slotIndex = templateSession.nextSlot;
+    const slot = template.slots[slotIndex];
+    if (!slot) break;
+    clip.templateId = template.id;
+    clip.templateSlot = slotIndex + 1;
+    clip.transform = { ...defaultTransform(), ...slot.transform };
+    clip.transition = {
+      type: slotIndex === 0 ? 'none' : slot.transition,
+      duration: Math.min(0.7, Math.max(0.25, slot.duration * 0.28)),
+    };
+    if (clip.kind === 'image') {
+      clip.duration = slot.duration;
+    } else {
+      const available = Math.max(0.1, clip.trimEnd - clip.trimStart);
+      if (available >= slot.duration) {
+        clip.trimEnd = clip.trimStart + slot.duration;
+        clip.speed = 1;
+      } else {
+        clip.speed = Math.max(0.25, available / slot.duration);
+      }
+    }
+    templateSession.nextSlot++;
+    applied++;
+  }
+
+  const remaining = Math.max(0, template.slots.length - templateSession.nextSlot);
+  return { applied, remaining, extras: Math.max(0, clips.length - applied) };
+}
+
 async function importVisualFiles(files) {
   if (!files.length) return;
   pause();
   const before = snapshot();
   let added = 0;
   let attached = 0;
+  const importedClips = [];
   for (const file of files) {
     try {
       const kind = visualKind(file);
@@ -271,7 +346,7 @@ async function importVisualFiles(files) {
       }
       const duration = kind === 'image' ? 3 : runtime.duration;
       if (!duration) throw new Error(`${file.name} has no readable duration.`);
-      videoClips().push({
+      const clip = {
         id: uid('video'),
         assetId: asset.id,
         name: file.name,
@@ -284,19 +359,28 @@ async function importVisualFiles(files) {
         speed: 1,
         transform: defaultTransform(),
         transition: defaultTransition(),
-      });
+      };
+      videoClips().push(clip);
+      importedClips.push(clip);
       added++;
     } catch (error) {
       console.warn('visual import failed', error);
       toast(`${file.name}: ${error.message}`, 'error');
     }
   }
+  const templateResult = applyTemplateToClips(importedClips);
   removeUnusedAssets();
   remember(before);
   currentTime = clamp(currentTime, 0, projectDuration());
   renderAll();
   syncMedia(true);
-  if (added) toast(`Added ${added} ${added === 1 ? 'clip' : 'clips'} to the timeline`, 'success');
+  if (templateResult?.applied) {
+    const extraNote = templateResult.extras ? ` ${templateResult.extras} extra ${templateResult.extras === 1 ? 'clip was' : 'clips were'} added after the recipe.` : '';
+    const message = templateResult.remaining
+      ? `${templateSession.template.name} started — add ${templateResult.remaining} more ${templateResult.remaining === 1 ? 'clip' : 'clips'}.${extraNote}`
+      : `${templateSession.template.name} is ready to customize.${extraNote}`;
+    toast(message, 'success');
+  } else if (added) toast(`Added ${added} ${added === 1 ? 'clip' : 'clips'} to the timeline`, 'success');
   else if (attached) toast(`Reattached ${attached} project ${attached === 1 ? 'file' : 'files'}`, 'success');
 }
 
@@ -751,16 +835,44 @@ function renderInspector() {
   else renderEditInspector();
 }
 
+function activeTemplateMarkup() {
+  if (!templateSession) return '<a class="browse-templates-card" href="./templates.html"><span aria-hidden="true">▦</span><div><strong>Browse templates</strong><small>Start with pacing, transitions, framing, and text</small></div><b aria-hidden="true">›</b></a>';
+  const { template } = templateSession;
+  templateSession.nextSlot = Math.min(
+    template.slots.length,
+    videoClips().filter((clip) => clip.templateId === template.id).length,
+  );
+  const total = template.slots.length;
+  const filled = templateSession.nextSlot;
+  const remaining = Math.max(0, total - filled);
+  return `<div class="active-template-card">
+    <span>${remaining ? 'Template selected' : 'Template applied'}</span>
+    <h3>${escapeHTML(template.name)}</h3>
+    <p>${remaining ? `${filled} of ${total} media slots filled. Choose ${remaining} more ${remaining === 1 ? 'item' : 'items'} to complete the recipe.` : `${total} media slots, transitions, framing, and editable text are ready.`}</p>
+    <div class="template-fill-progress"><i style="--filled:${filled / total * 100}%"></i></div>
+    <div class="active-template-actions">
+      ${remaining ? `<button id="fill-template" class="primary">Choose ${remaining} ${remaining === 1 ? 'item' : 'items'}</button>` : '<button id="fill-template" class="primary">Add more media</button>'}
+      <a href="./templates.html">Change</a>
+    </div>
+  </div>`;
+}
+
 function renderMediaInspector() {
+  const templateMarkup = activeTemplateMarkup();
+  const remaining = templateSession
+    ? Math.max(0, templateSession.template.slots.length - templateSession.nextSlot)
+    : 0;
   els.inspectorContent.innerHTML = `
+    ${templateMarkup}
     <button class="import-card primary-card" id="add-visuals">
       <span class="import-icon" aria-hidden="true">＋</span>
-      <span><strong>Add videos or photos</strong><small>Choose several clips from your phone</small></span>
+      <span><strong>${remaining ? `Fill ${remaining} remaining ${remaining === 1 ? 'slot' : 'slots'}` : 'Add videos or photos'}</strong><small>${remaining ? 'Select them together from your phone' : 'Choose several clips from your phone'}</small></span>
     </button>
     <p class="section-label">Story order</p>
     <div class="asset-list" id="visual-list"></div>
     <p class="privacy-note"><span aria-hidden="true">●</span> Files are edited locally and never uploaded.</p>`;
   $('add-visuals').addEventListener('click', () => els.videoInput.click());
+  $('fill-template')?.addEventListener('click', () => els.videoInput.click());
   const list = $('visual-list');
   if (!videoClips().length) {
     list.innerHTML = inspectorEmpty('Your clips will appear here in playback order.');
@@ -1348,6 +1460,7 @@ $('load-project').addEventListener('change', async (event) => {
     for (const runtime of runtimeStore.values()) URL.revokeObjectURL(runtime.url);
     runtimeStore.clear();
     const names = restoreProject(await file.text());
+    templateSession = null;
     undoStack.length = 0;
     redoStack.length = 0;
     selected = null;
@@ -1426,7 +1539,15 @@ $('export-cancel').addEventListener('click', cancelExport);
 
 // ---------- boot ----------
 
-if (location.hash === '#captions') {
+if (requestedTemplate) {
+  activeTool = 'media';
+  els.inspector.classList.add('open');
+  project.title = `${requestedTemplate.name} edit`;
+  project.canvas = { ...project.canvas, ...requestedTemplate.canvas };
+  els.emptyAdd.querySelector('strong').textContent = `Fill ${requestedTemplate.name}`;
+  els.emptyAdd.querySelector('small').textContent = `Choose ${requestedTemplate.slots.length} photos or videos from your phone`;
+  document.title = `${requestedTemplate.name} · CapyStudio`;
+} else if (location.hash === '#captions') {
   activeTool = 'text';
   els.inspector.classList.add('open');
 }

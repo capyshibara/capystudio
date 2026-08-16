@@ -122,4 +122,7 @@ Desktop timing is keyboard-driven. Mobile gets a **Timing mode takeover**:
    captions and edit one of the resulting text layers.
 7. Change canvas aspect and fit; clip order and total duration remain stable.
 8. Export: wake lock held, progress overlay readable, output downloads.
-8. No horizontal page scroll at 390×844; timeline itself scrolls as intended.
+9. Open the Template Library, filter/search presets, preview one, choose **Use
+   template**, and batch-select the requested number of media items. Confirm
+   canvas, pacing, transforms, transitions, and editable text are applied.
+10. No horizontal page scroll at 390×844; timeline itself scrolls as intended.
